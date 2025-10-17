@@ -1,5 +1,5 @@
 """Database schema creation and migrations."""
-from database.models import db
+from ttodo.database.models import db
 
 
 def create_schema():

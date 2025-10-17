@@ -1,15 +1,15 @@
 """Test script for Iteration 1 foundation."""
 import sys
-from database.models import db
-from database.migrations import create_schema
-from utils.colors import (
+from ttodo.database.models import db
+from ttodo.database.migrations import create_schema
+from ttodo.utils.colors import (
     ROLE_COLORS,
     get_role_color,
     get_active_color,
     get_blocked_color,
     adjust_brightness
 )
-from commands.parser import parser
+from ttodo.commands.parser import parser
 
 
 def test_database():
@@ -139,7 +139,7 @@ def main():
     print()
     if all_passed:
         print("✓ All foundation tests passed!")
-        print("\nYou can now run the app with: python main.py")
+        print("\nYou can now run the app with: ttodo")
         return 0
     else:
         print("✗ Some tests failed. Please review errors above.")

@@ -3,9 +3,9 @@ from textual.app import App, ComposeResult
 from textual.widgets import Input, Static, Header
 from textual.containers import Container, Vertical
 from textual.binding import Binding
-from commands.parser import parser
-from database.models import db
-from database.migrations import initialize_database
+from ttodo.commands.parser import parser
+from ttodo.database.models import db
+from ttodo.database.migrations import initialize_database
 
 
 class CommandInput(Input):
@@ -147,7 +147,7 @@ Available Commands:
 Navigation:
   Ctrl+C               Quit application
   Esc                  Clear command input
-  ‘/“                  Navigate command history (coming soon)
+  ï¿½/ï¿½                  Navigate command history (coming soon)
 
 Status: Iteration 1 - Foundation Complete
 """

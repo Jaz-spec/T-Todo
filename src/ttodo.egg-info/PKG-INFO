@@ -1,0 +1,249 @@
+Metadata-Version: 2.4
+Name: ttodo
+Version: 0.1.0
+Summary: A terminal-based productivity tool for managing role-based to-do lists
+Author: Terminal Todo Contributors
+License: MIT
+Project-URL: Homepage, https://github.com/yourusername/ttodo
+Project-URL: Repository, https://github.com/yourusername/ttodo
+Project-URL: Issues, https://github.com/yourusername/ttodo/issues
+Keywords: todo,terminal,tui,productivity,task-management
+Classifier: Development Status :: 3 - Alpha
+Classifier: Environment :: Console
+Classifier: Intended Audience :: Developers
+Classifier: Intended Audience :: End Users/Desktop
+Classifier: License :: OSI Approved :: MIT License
+Classifier: Operating System :: MacOS
+Classifier: Operating System :: POSIX :: Linux
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.10
+Classifier: Programming Language :: Python :: 3.11
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Topic :: Office/Business :: Scheduling
+Classifier: Topic :: Utilities
+Requires-Python: >=3.10
+Description-Content-Type: text/markdown
+Requires-Dist: textual>=0.40.0
+Requires-Dist: python-dateutil>=2.8.0
+Requires-Dist: rich>=13.0.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.0.0; extra == "dev"
+Requires-Dist: black>=23.0.0; extra == "dev"
+Requires-Dist: ruff>=0.1.0; extra == "dev"
+
+# Terminal Todo
+
+A terminal-based productivity tool for managing role-based to-do lists with window management and kanban views.
+
+## Current Status
+
+**Iteration 1 Complete** - Foundation established
+
+### What's Working
+- ✅ Project structure with modular organization
+- ✅ SQLite database with complete schema (6 tables)
+- ✅ Autumnal color palette with brightness adjustments
+- ✅ Basic Textual TUI with command input
+- ✅ Command parser foundation
+- ✅ Database initialization and migrations
+
+### What's Next
+- Iteration 2: Role creation and single-panel task management
+- Iteration 3: Task CRUD operations (view, edit, delete, status)
+- Iterations 4-9: Window management, kanban views, navigation, polish
+
+## Installation
+
+### Quick Start (Recommended)
+
+```bash
+make install    # Install package in development mode
+make init       # Initialize database
+make test       # Run tests to verify everything works
+make run        # Launch the application!
+```
+
+After installation, you can run `ttodo` from anywhere (when venv is activated).
+
+### Makefile Commands
+```bash
+make help           # Show all available commands
+make install        # Install in development mode (pip install -e .)
+make dev-install    # Install with dev dependencies
+make init           # Initialize database
+make test           # Run tests
+make run            # Run ttodo command
+make build          # Build distribution packages
+make clean          # Remove venv, database, and build artifacts
+make reset          # Clean and reinstall everything
+```
+
+### Manual Installation (Advanced)
+
+1. **Install as package**
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate
+   pip install -e .
+   ```
+
+2. **Initialize database**
+   ```bash
+   python -m ttodo.database.migrations
+   ```
+
+### Distribution Installation (Future)
+
+Once published to PyPI, users will be able to install globally:
+```bash
+pip install ttodo
+ttodo  # Run from anywhere!
+```
+
+## Usage
+
+### Run the application
+```bash
+make run          # Using Makefile
+# or
+ttodo             # Direct command (after activating venv)
+# or
+python -m ttodo   # As Python module
+```
+
+### Available Commands (Iteration 1)
+- `help` - Show help message
+- `exit` - Exit application (or press Ctrl+C)
+- `hello` - Test command (echoes back)
+
+### Keyboard Shortcuts
+- `Ctrl+C` - Quit application
+- `Esc` - Clear command input
+
+## Testing
+
+```bash
+make test
+# or manually: python tests/test_foundation.py
+```
+
+## Project Structure
+
+```
+T-Todo/                          # Project root
+├── Makefile                    # Build and development commands
+├── README.md                   # This file
+├── requirements.txt            # Python dependencies
+├── pyproject.toml              # Package configuration
+├── setup.py                    # Setup script (for compatibility)
+├── MANIFEST.in                 # Package manifest
+├── venv/                       # Virtual environment
+├── CLAUDE/                     # Development documentation
+│   ├── agent.md               # Iteration approach
+│   ├── brief.md               # Technical specification
+│   ├── tasks.xml              # Detailed iteration tasks
+│   └── Iteration_reports/     # Notes from each iteration
+├── tests/                      # Test suite
+│   └── test_foundation.py     # Foundation tests
+└── src/ttodo/                  # Main package (installed as 'ttodo')
+    ├── __init__.py            # Package initialization
+    ├── __main__.py            # Module entry point (python -m ttodo)
+    ├── cli.py                 # CLI entry point ('ttodo' command)
+    ├── app.py                 # Main TUI application
+    ├── config.py              # Configuration constants
+    ├── database/
+    │   ├── __init__.py
+    │   ├── models.py          # Database connection and operations
+    │   └── migrations.py      # Schema creation
+    ├── ui/
+    │   ├── __init__.py
+    │   ├── panels.py          # Role panel widgets (coming in Iteration 2)
+    │   ├── kanban.py          # Kanban view (coming in Iteration 5)
+    │   ├── input_box.py       # Command input widget
+    │   └── task_detail.py     # Task detail view
+    ├── commands/
+    │   ├── __init__.py
+    │   ├── parser.py          # Command parsing
+    │   ├── role_commands.py   # Role management commands
+    │   ├── task_commands.py   # Task management commands
+    │   └── window_commands.py # Window management commands
+    └── utils/
+        ├── __init__.py
+        ├── colors.py          # Color management
+        ├── date_utils.py      # Date parsing and formatting
+        └── validators.py      # Input validation
+```
+
+## Technology Stack
+
+- **Language**: Python 3.10+
+- **TUI Framework**: Textual 6.3.0
+- **Database**: SQLite3
+- **Styling**: Rich 14.2.0
+- **Date Handling**: python-dateutil 2.9.0
+
+## Development Philosophy
+
+This project follows an iterative, learning-focused approach:
+- Each iteration produces a working, testable application
+- Features are built horizontally (across the app) before adding depth
+- Simplicity first, complexity added incrementally
+- Continuous testing and refactoring
+
+## Distribution & Packaging
+
+### Building Distribution Packages
+
+To build wheel and source distributions for PyPI:
+
+```bash
+make build
+```
+
+This creates:
+- `dist/ttodo-0.1.0-py3-none-any.whl` (wheel package)
+- `dist/ttodo-0.1.0.tar.gz` (source distribution)
+
+### Publishing to PyPI (Future)
+
+Once ready for public release:
+
+```bash
+pip install twine
+twine upload dist/*
+```
+
+### Installing from Build
+
+Users can install the built wheel directly:
+
+```bash
+pip install dist/ttodo-0.1.0-py3-none-any.whl
+```
+
+### Creating Standalone Executables
+
+For distribution without Python dependency (using PyInstaller):
+
+```bash
+pip install pyinstaller
+pyinstaller --onefile --name ttodo src/ttodo/cli.py
+```
+
+This creates a single executable in `dist/ttodo` that can be distributed.
+
+## License
+
+See project root for license information.
+
+## Iteration Progress
+
+- [x] **Iteration 1**: Foundation (Database, TUI shell, Colors, **Package Structure**)
+- [ ] **Iteration 2**: Core Flow (Roles, Tasks, Single Panel)
+- [ ] **Iteration 3**: Task Management (Edit, Delete, Status)
+- [ ] **Iteration 4**: Window Management (Multi-panel)
+- [ ] **Iteration 5**: Kanban Views
+- [ ] **Iteration 6**: Navigation & Role Management
+- [ ] **Iteration 7**: Dependencies & Batch Operations
+- [ ] **Iteration 8**: Validation & Error Handling
+- [ ] **Iteration 9**: Polish & Optimization

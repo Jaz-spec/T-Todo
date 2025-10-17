@@ -1,6 +1,4 @@
 # Terminal Productivity Tool - Technical Specification
-Note: the tasks for this specififcation are outlined in tasks.xml
-Note: notes from each iteration sits in CLAUDE/Iteration_reports
 
 ## 1. Overview
 
