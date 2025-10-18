@@ -2,6 +2,7 @@
 from ttodo.database.models import db
 from ttodo.utils.date_utils import parse_date
 from typing import Optional
+import json
 
 
 def get_next_task_number(role_id: int) -> int:
@@ -117,6 +118,70 @@ def get_tasks_for_role(role_id: int, status: Optional[str] = None):
         )
 
 
+def update_task(
+    task_id: int,
+    title: Optional[str] = None,
+    description: Optional[str] = None,
+    due_date: Optional[str] = None,
+    priority: Optional[str] = None,
+    story_points: Optional[int] = None
+) -> bool:
+    """Update task fields.
+
+    Args:
+        task_id: Task ID
+        title: New title (optional)
+        description: New description (optional)
+        due_date: New due date string (will be parsed to ISO format)
+        priority: New priority level (High/Medium/Low)
+        story_points: New story points (1,2,3,5,8,13)
+
+    Returns:
+        True if successful, False otherwise
+    """
+    # Parse due date if provided
+    iso_date = None
+    if due_date is not None:
+        iso_date = parse_date(due_date) if due_date else None
+
+    # Build update query dynamically based on provided fields
+    updates = []
+    params = []
+
+    if title is not None:
+        updates.append("title = ?")
+        params.append(title)
+
+    if description is not None:
+        updates.append("description = ?")
+        params.append(description)
+
+    if due_date is not None:
+        updates.append("due_date = ?")
+        params.append(iso_date)
+
+    if priority is not None:
+        updates.append("priority = ?")
+        params.append(priority)
+
+    if story_points is not None:
+        updates.append("story_points = ?")
+        params.append(story_points)
+
+    if not updates:
+        return False  # Nothing to update
+
+    # Add task_id to params
+    params.append(task_id)
+
+    # Execute update
+    query = f"UPDATE tasks SET {', '.join(updates)} WHERE id = ?"
+    db.execute(query, tuple(params))
+    db.commit()
+
+    return True
+
+
 def update_task_status(task_id: int, status: str) -> bool:
     """Update task status.
 
@@ -145,15 +210,101 @@ def update_task_status(task_id: int, status: str) -> bool:
     return True
 
 
-def delete_task(task_id: int) -> bool:
+def delete_task(task_id: int, save_to_undo: bool = True) -> bool:
     """Delete a task.
 
     Args:
         task_id: Task ID
+        save_to_undo: Whether to save to undo stack (default True)
 
     Returns:
         True if successful, False otherwise
     """
+    # Get task data before deletion (for undo)
+    if save_to_undo:
+        task = db.fetchone("SELECT * FROM tasks WHERE id = ?", (task_id,))
+        if task:
+            save_task_to_undo(task)
+
     db.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
     db.commit()
     return True
+
+
+def save_task_to_undo(task) -> None:
+    """Save deleted task to undo stack.
+
+    Args:
+        task: Task database row
+    """
+    # Convert task row to dict
+    task_data = dict(task)
+
+    # Serialize to JSON
+    data_json = json.dumps(task_data)
+
+    # Insert into undo stack
+    db.execute(
+        "INSERT INTO undo_stack (action_type, data) VALUES (?, ?)",
+        ('delete_task', data_json)
+    )
+    db.commit()
+
+    # Limit undo stack to 20 items
+    db.execute("""
+        DELETE FROM undo_stack
+        WHERE id NOT IN (
+            SELECT id FROM undo_stack
+            ORDER BY created_at DESC
+            LIMIT 20
+        )
+    """)
+    db.commit()
+
+
+def undo_last_deletion() -> Optional[dict]:
+    """Restore last deleted task from undo stack.
+
+    Returns:
+        Restored task data if successful, None otherwise
+    """
+    # Get most recent delete_task action
+    undo_entry = db.fetchone(
+        """SELECT * FROM undo_stack
+           WHERE action_type = 'delete_task'
+           ORDER BY created_at DESC
+           LIMIT 1"""
+    )
+
+    if not undo_entry:
+        return None
+
+    # Parse task data
+    task_data = json.loads(undo_entry['data'])
+
+    # Restore task to database
+    db.execute(
+        """INSERT INTO tasks
+           (id, role_id, task_number, title, description, due_date,
+            priority, story_points, status, completed_at, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            task_data['id'],
+            task_data['role_id'],
+            task_data['task_number'],
+            task_data['title'],
+            task_data.get('description'),
+            task_data.get('due_date'),
+            task_data.get('priority'),
+            task_data.get('story_points'),
+            task_data['status'],
+            task_data.get('completed_at'),
+            task_data['created_at']
+        )
+    )
+
+    # Remove from undo stack
+    db.execute("DELETE FROM undo_stack WHERE id = ?", (undo_entry['id'],))
+    db.commit()
+
+    return task_data

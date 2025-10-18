@@ -1,5 +1,6 @@
 """Command parsing and routing."""
 from typing import Optional, Tuple, Dict, Any
+import re
 
 
 class CommandParser:
@@ -23,8 +24,17 @@ class CommandParser:
         parts = command_str.split()
         command = parts[0].lower()
 
-        # For now, just return basic parsing
-        # We'll expand this in later iterations
+        # Check for task commands: t1 view, t2 edit, t3 delete, t4 doing, etc.
+        if match := re.match(r'^t(\d+)$', command):
+            task_num = int(match.group(1))
+            action = parts[1].lower() if len(parts) > 1 else None
+            return ("task", {
+                "task_number": task_num,
+                "action": action,
+                "parts": parts[2:] if len(parts) > 2 else []
+            })
+
+        # For now, just return basic parsing for other commands
         return (command, {"raw": command_str, "parts": parts[1:]})
 
     def get_command_type(self, command_str: str) -> str:
