@@ -1,5 +1,4 @@
 """Main TUI application using Textual."""
-
 from textual.app import App, ComposeResult
 from textual.widgets import Input, Static, Header
 from textual.containers import Container, Vertical
@@ -9,7 +8,7 @@ from ttodo.commands import role_commands, task_commands
 from ttodo.database.models import db
 from ttodo.database.migrations import initialize_database
 from ttodo.ui.panels import RolePanel
-from ttodo.utils.colors import ROLE_COLORS, get_role_color
+from ttodo.utils.colors import ROLE_COLORS, get_next_color_index, get_role_color
 import re
 
 
@@ -23,9 +22,7 @@ class CommandInput(Input):
 
     def add_to_history(self, command: str):
         """Add command to history."""
-        if command and (
-            not self.command_history or command != self.command_history[-1]
-        ):
+        if command and (not self.command_history or command != self.command_history[-1]):
             self.command_history.append(command)
             if len(self.command_history) > 50:  # Max 50 commands
                 self.command_history.pop(0)
@@ -153,7 +150,7 @@ class TodoApp(App):
             command_str: Command string to handle
         """
         command, args = parser.parse(command_str)
-        parts = args.get("parts", [])
+        parts = args.get('parts', [])
 
         # Exit command
         if command == "exit":
@@ -182,9 +179,7 @@ class TodoApp(App):
         # Add task command
         elif command == "add":
             if not self.active_role_id:
-                self.show_error(
-                    "No role selected. Use 'r1' to select a role or 'new role' to create one."
-                )
+                self.show_error("No role selected. Use 'r1' to select a role or 'new role' to create one.")
             else:
                 self.create_new_task()
             return
@@ -195,29 +190,22 @@ class TodoApp(App):
 
         # Unknown command
         else:
-            self.show_error(
-                f"Unknown command: {command_str}\n\nType 'help' for available commands."
-            )
+            self.show_error(f"Unknown command: {command_str}\n\nType 'help' for available commands.")
 
     def show_help(self) -> None:
         """Display help information."""
         help_text = """
 Terminal Todo - Help
 
-Role Management:
-  new role             Create a new role (interactive prompts)
-  r[number]            Select a role (e.g., r1, r2)
-
-Task Management:
-  add                  Add a task to the active role (interactive prompts)
-
-General:
+Available Commands:
   help                 Show this help message
   exit                 Exit the application (or press Ctrl+C)
+  new role             Create a new role (coming in Iteration 2)
 
-Keyboard Shortcuts:
+Navigation:
   Ctrl+C               Quit application
   Esc                  Clear command input
+  �/�                  Navigate command history (coming soon)
 
 Status: Iteration 2 - Core Flow Implementation
 """
@@ -226,9 +214,7 @@ Status: Iteration 2 - Core Flow Implementation
     def create_new_role(self) -> None:
         """Create a new role with prompted input."""
         # For Iteration 2, use simple approach - show instruction, then wait for input
-        self.update_content(
-            "Creating new role...\n\nEnter role name in the command box below:"
-        )
+        self.update_content("Creating new role...\n\nEnter role name in the command box below:")
         self.command_input.placeholder = "Enter role name..."
         self._awaiting_role_name = True
 
@@ -272,7 +258,7 @@ Status: Iteration 2 - Core Flow Implementation
             self.show_error(f"Role r{display_number} not found")
             return
 
-        self.active_role_id = role["id"]
+        self.active_role_id = role['id']
         self.display_role_panel(role)
 
     def display_role_panel(self, role) -> None:
@@ -283,11 +269,11 @@ Status: Iteration 2 - Core Flow Implementation
         """
         # Create or update role panel
         panel = RolePanel(
-            role_id=role["id"],
-            role_name=role["name"],
-            display_number=role["display_number"],
-            color=role["color"],
-            is_active=True,
+            role_id=role['id'],
+            role_name=role['name'],
+            display_number=role['display_number'],
+            color=role['color'],
+            is_active=True
         )
 
         self.current_panel = panel
@@ -304,9 +290,7 @@ Status: Iteration 2 - Core Flow Implementation
             self.show_error("No active role selected")
             return
 
-        self.update_content(
-            "Creating new task...\n\nEnter task title in the command box below:"
-        )
+        self.update_content("Creating new task...\n\nEnter task title in the command box below:")
         self.command_input.placeholder = "Enter task title..."
         self._awaiting_task_title = True
 
@@ -321,16 +305,12 @@ Status: Iteration 2 - Core Flow Implementation
 
         if not title or not title.strip():
             self.show_error("Task title cannot be empty")
-            self.command_input.placeholder = (
-                "Type a command... (type 'help' for commands)"
-            )
+            self.command_input.placeholder = "Type a command... (type 'help' for commands)"
             return
 
         self._pending_task_title = title
         self._awaiting_task_due_date = True
-        self.update_content(
-            f"Task title: {title}\n\nEnter due date (optional, press Enter to skip):\nFormats: 'tomorrow', 'today', 'DD MM YY', or '+3d'"
-        )
+        self.update_content(f"Task title: {title}\n\nEnter due date (optional, press Enter to skip):\nFormats: 'tomorrow', 'today', 'DD MM YY', or '+3d'")
 
     def _handle_task_due_date_input(self, due_date_str: str) -> None:
         """Handle task due date input.
@@ -345,7 +325,7 @@ Status: Iteration 2 - Core Flow Implementation
         task_id = task_commands.create_task(
             role_id=self.active_role_id,
             title=self._pending_task_title,
-            due_date=due_date_str if due_date_str.strip() else None,
+            due_date=due_date_str if due_date_str.strip() else None
         )
 
         if task_id:
