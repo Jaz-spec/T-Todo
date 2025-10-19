@@ -5,11 +5,12 @@ from textual.widgets import Input, Static, Header
 from textual.containers import Container, Vertical
 from textual.binding import Binding
 from ttodo.commands.parser import parser
-from ttodo.commands import role_commands, task_commands
+from ttodo.commands import role_commands, task_commands, window_commands
 from ttodo.database.models import db
 from ttodo.database.migrations import initialize_database
 from ttodo.ui.panels import RolePanel
 from ttodo.ui.task_detail import render_task_detail
+from ttodo.ui.multi_panel_grid import MultiPanelGrid
 from ttodo.utils.colors import ROLE_COLORS, get_role_color
 import re
 
@@ -57,14 +58,18 @@ class TodoApp(App):
     }
 
     .input-container {
-        height: auto;
+        height: 3;
         dock: bottom;
-        background: $surface;
-        padding: 1;
+        background: transparent;
+        border: round #D4A574;
+        padding: 0 1;
     }
 
     CommandInput {
         width: 100%;
+        height: 1;
+        border: none;
+        background: transparent;
     }
 
     .error {
@@ -79,14 +84,25 @@ class TodoApp(App):
     BINDINGS = [
         Binding("ctrl+c", "quit", "Quit", show=True),
         Binding("escape", "clear_input", "Clear", show=False),
+        Binding("tab", "focus_next_panel", "Next Panel", show=False),
     ]
 
     def __init__(self):
         super().__init__()
         self.main_content = None
         self.command_input = None
+        self.input_container = None  # Container with border title
         self.active_role_id = None  # Currently selected role
-        self.current_panel = None  # Currently displayed panel widget
+        self.current_panel = None  # Currently displayed panel widget (single-panel mode)
+
+        # Multi-panel window management
+        self.multi_panel_grid = None  # MultiPanelGrid widget (multi-panel mode)
+        self.in_multi_panel_mode = False  # Track if using multi-panel layout
+        self._awaiting_window_role_selection = False  # Waiting for role selection for window
+        self._pending_window_panel_count = 0  # Number of panels being configured
+        self._pending_window_roles = []  # Roles selected for each panel
+        self._current_window_panel_index = 0  # Current panel being configured
+
         # State flags for interactive input
         self._awaiting_role_name = False
         self._awaiting_task_title = False
@@ -106,15 +122,21 @@ class TodoApp(App):
 
         yield self.main_content
 
-        # Input container at bottom
-        with Container(classes="input-container"):
-            yield Static("> ", id="prompt")
+        # Input container at bottom with role label as border title
+        self.input_container = Container(classes="input-container", id="input-container")
+        with self.input_container:
             yield self.command_input
 
     def on_mount(self) -> None:
         """Called when app is mounted."""
         # Initialize database
         initialize_database()
+
+        # Load saved window layout if exists
+        layout = window_commands.load_window_layout()
+        if layout:
+            panel_count, panel_roles = layout
+            self._create_multi_panel_layout(panel_count, panel_roles)
 
         # Focus the input
         self.command_input.focus()
@@ -172,6 +194,10 @@ class TodoApp(App):
 
         if self._awaiting_edit_due_date:
             self._handle_edit_due_date_input(command_str)
+            return
+
+        if self._awaiting_window_role_selection:
+            self._handle_window_role_selection(command_str)
             return
 
         # Add to history
@@ -233,6 +259,23 @@ class TodoApp(App):
             self.undo_last_deletion()
             return
 
+        # Window command (window [count])
+        elif command == "window":
+            if parts and parts[0].isdigit():
+                panel_count = int(parts[0])
+                if 1 <= panel_count <= 8:
+                    self.create_window_layout(panel_count)
+                else:
+                    self.show_error("Panel count must be between 1 and 8")
+            else:
+                self.show_error("Usage: window [1-8]")
+            return
+
+        # Close command (close current panel)
+        elif command == "close":
+            self.close_focused_panel()
+            return
+
         # Empty command
         elif command == "empty":
             pass
@@ -261,6 +304,11 @@ Task Management:
   t[number] done       Mark task as completed (e.g., t5 done)
   t[number] todo       Mark task as to-do (e.g., t6 todo)
 
+Window Management:
+  window [1-8]         Create multi-panel layout (e.g., window 2, window 4)
+  close                Close currently focused panel
+  Tab                  Switch focus between panels
+
 Utility:
   undo                 Undo last deletion
   help                 Show this help message
@@ -269,8 +317,9 @@ Utility:
 Keyboard Shortcuts:
   Ctrl+C               Quit application
   Esc                  Clear command input
+  Tab                  Focus next panel (in multi-panel mode)
 
-Status: Iteration 3 - Task Lifecycle Management
+Status: Iteration 4 - Window Management
 """
         self.update_content(help_text)
 
@@ -307,6 +356,7 @@ Status: Iteration 3 - Task Lifecycle Management
             # Automatically select the new role
             role = role_commands.get_role_by_id(role_id)
             self.active_role_id = role_id
+            self.update_command_placeholder()
             self.display_role_panel(role)
         else:
             self.show_error("Failed to create role")
@@ -324,14 +374,29 @@ Status: Iteration 3 - Task Lifecycle Management
             return
 
         self.active_role_id = role["id"]
-        self.display_role_panel(role)
+        self.update_command_placeholder()
+
+        # Only display in single-panel mode
+        if not self.in_multi_panel_mode:
+            self.display_role_panel(role)
 
     def display_role_panel(self, role) -> None:
-        """Display a role panel in the main content area.
+        """Display a role panel in the main content area (single-panel mode).
 
         Args:
             role: Role database row
         """
+        # If in multi-panel mode, exit it first
+        if self.in_multi_panel_mode and self.multi_panel_grid:
+            self.multi_panel_grid.remove()
+            self.multi_panel_grid = None
+            self.in_multi_panel_mode = False
+
+            # Create new MainContent static widget
+            new_content = MainContent()
+            self.main_content = new_content
+            self.mount(new_content, before=0)
+
         # Create or update role panel
         panel = RolePanel(
             role_id=role["id"],
@@ -346,8 +411,199 @@ Status: Iteration 3 - Task Lifecycle Management
 
     def refresh_current_panel(self) -> None:
         """Refresh the currently displayed panel."""
-        if self.current_panel:
+        if self.in_multi_panel_mode and self.multi_panel_grid:
+            # Refresh focused panel in multi-panel mode
+            self.multi_panel_grid.refresh_focused_panel()
+        elif self.current_panel:
+            # Refresh single panel
             self.main_content.update(self.current_panel.render())
+
+    def refresh_panel_for_role(self, role_id: int) -> None:
+        """Refresh the panel displaying a specific role.
+
+        Args:
+            role_id: The role ID to refresh
+        """
+        if self.in_multi_panel_mode and self.multi_panel_grid:
+            # Find and refresh the panel with this role_id
+            for panel_container in self.multi_panel_grid.panel_containers:
+                if panel_container.role_id == role_id:
+                    panel_container.refresh_panel()
+                    break
+        elif self.current_panel and self.active_role_id == role_id:
+            # Refresh single panel if it matches
+            self.main_content.update(self.current_panel.render())
+
+    # Window Management Methods
+
+    def update_command_placeholder(self) -> None:
+        """Update role label to show active role."""
+        if self.active_role_id and self.input_container:
+            role = role_commands.get_role_by_id(self.active_role_id)
+            if role:
+                self.input_container.border_title = f"r{role['display_number']}"
+                return
+
+        # Clear label when no role is active
+        if self.input_container:
+            self.input_container.border_title = ""
+
+    def create_window_layout(self, panel_count: int) -> None:
+        """Start creating a multi-panel window layout.
+
+        Args:
+            panel_count: Number of panels (1-8)
+        """
+        self._pending_window_panel_count = panel_count
+        self._pending_window_roles = []
+        self._current_window_panel_index = 0
+        self._awaiting_window_role_selection = True
+
+        # Show role selection prompt
+        self._show_window_role_prompt()
+
+    def _show_window_role_prompt(self) -> None:
+        """Show prompt for selecting role for current panel."""
+        panel_num = self._current_window_panel_index + 1
+        total = self._pending_window_panel_count
+
+        # Get list of available roles
+        roles = role_commands.get_all_roles()
+        if not roles:
+            self.show_error("No roles available. Create a role first with 'new role'")
+            self._awaiting_window_role_selection = False
+            return
+
+        # Format roles list
+        roles_text = "\n".join([f"  r{role['display_number']}: {role['name']}" for role in roles])
+
+        prompt_text = f"""Setting up window layout ({panel_num}/{total})
+
+Available roles:
+{roles_text}
+
+Enter role number for Panel {panel_num} (e.g., r1, r2):
+Or press Enter to leave panel empty"""
+
+        self.update_content(prompt_text)
+        self.command_input.placeholder = f"Panel {panel_num} role (e.g., r1)..."
+
+    def _handle_window_role_selection(self, input_str: str) -> None:
+        """Handle role selection for window panel.
+
+        Args:
+            input_str: User input (e.g., "r1", "r2", or empty)
+        """
+        role_id = None
+
+        # Parse role selection
+        if input_str.strip():
+            if input_str.lower().startswith('r'):
+                try:
+                    role_num = int(input_str[1:])
+                    role = role_commands.get_role_by_number(role_num)
+                    if role:
+                        role_id = role["id"]
+                    else:
+                        self.show_error(f"Role r{role_num} not found. Try again.")
+                        return
+                except ValueError:
+                    self.show_error(f"Invalid role number: {input_str}. Try again.")
+                    return
+            else:
+                self.show_error(f"Invalid input: {input_str}. Use format 'r1', 'r2', etc.")
+                return
+
+        # Add role to pending list
+        self._pending_window_roles.append(role_id)
+        self._current_window_panel_index += 1
+
+        # Check if we've configured all panels
+        if self._current_window_panel_index >= self._pending_window_panel_count:
+            # Create the layout
+            self._create_multi_panel_layout(
+                self._pending_window_panel_count,
+                self._pending_window_roles
+            )
+            # Save to database
+            window_commands.save_window_layout(
+                self._pending_window_panel_count,
+                self._pending_window_roles
+            )
+            # Reset state
+            self._awaiting_window_role_selection = False
+            self._pending_window_roles = []
+            self._current_window_panel_index = 0
+            self.command_input.placeholder = "Type a command... (type 'help' for commands)"
+        else:
+            # Show prompt for next panel
+            self._show_window_role_prompt()
+
+    def _create_multi_panel_layout(self, panel_count: int, panel_roles: list) -> None:
+        """Create and display a multi-panel layout.
+
+        Args:
+            panel_count: Number of panels
+            panel_roles: List of role IDs for each panel
+        """
+        # Create multi-panel grid
+        self.multi_panel_grid = MultiPanelGrid(panel_count, panel_roles)
+        self.in_multi_panel_mode = True
+
+        # Remove old content and mount new grid
+        if self.main_content:
+            self.main_content.remove()
+
+        self.main_content = self.multi_panel_grid
+        self.mount(self.multi_panel_grid, before=0)
+
+        # Set active role to first panel's role
+        if panel_roles and panel_roles[0]:
+            self.active_role_id = panel_roles[0]
+            self.update_command_placeholder()
+
+        # Don't show success message - it would replace the multi-panel grid
+        # The panels themselves are the visual confirmation of success
+
+    def close_focused_panel(self) -> None:
+        """Close the currently focused panel and recalculate layout."""
+        if not self.in_multi_panel_mode or not self.multi_panel_grid:
+            self.show_error("Not in multi-panel mode. Use 'window [count]' to create layout.")
+            return
+
+        focused_index = self.multi_panel_grid.focused_panel_index
+
+        # Remove panel from layout
+        result = window_commands.remove_panel_from_layout(focused_index)
+
+        if result is None:
+            # No panels left, return to single-panel mode
+            self.in_multi_panel_mode = False
+            if self.multi_panel_grid:
+                self.multi_panel_grid.remove()
+            self.multi_panel_grid = None
+
+            # Create new MainContent static widget
+            new_content = MainContent()
+            new_content.update("All panels closed.\n\nType 'window [count]' to create a new layout.")
+            self.main_content = new_content
+            self.mount(new_content, before=0)
+        else:
+            # Recreate layout with remaining panels
+            panel_count, panel_roles = result
+            self._create_multi_panel_layout(panel_count, panel_roles)
+            # Don't show success - the updated layout is the visual confirmation
+
+    def action_focus_next_panel(self) -> None:
+        """Action handler for Tab key - focus next panel."""
+        if self.in_multi_panel_mode and self.multi_panel_grid:
+            new_index = self.multi_panel_grid.focus_next_panel()
+            # Update active role to focused panel's role
+            new_role_id = self.multi_panel_grid.get_focused_role_id()
+            if new_role_id:
+                self.active_role_id = new_role_id
+                self.update_command_placeholder()
+        # In single-panel mode, Tab does nothing (Textual default behavior)
 
     def create_new_task(self) -> None:
         """Start task creation process."""
@@ -355,11 +611,14 @@ Status: Iteration 3 - Task Lifecycle Management
             self.show_error("No active role selected")
             return
 
-        self.update_content(
-            "Creating new task...\n\nEnter task title in the command box below:"
-        )
         self.command_input.placeholder = "Enter task title..."
         self._awaiting_task_title = True
+
+        # Only update content in single-panel mode
+        if not self.in_multi_panel_mode:
+            self.update_content(
+                "Creating new task...\n\nEnter task title in the command box below:"
+            )
 
     def _handle_task_title_input(self, title: str) -> None:
         """Handle task title input.
@@ -368,7 +627,6 @@ Status: Iteration 3 - Task Lifecycle Management
             title: Task title
         """
         self._awaiting_task_title = False
-        self.command_input.placeholder = "Due date (or press Enter to skip)..."
 
         if not title or not title.strip():
             self.show_error("Task title cannot be empty")
@@ -379,9 +637,13 @@ Status: Iteration 3 - Task Lifecycle Management
 
         self._pending_task_title = title
         self._awaiting_task_due_date = True
-        self.update_content(
-            f"Task title: {title}\n\nEnter due date (optional, press Enter to skip):\nFormats: 'tomorrow', 'today', 'DD MM YY', or '+3d'"
-        )
+        self.command_input.placeholder = "Due date (today/tomorrow/DD MM YY or Enter to skip)..."
+
+        # Only update content in single-panel mode
+        if not self.in_multi_panel_mode:
+            self.update_content(
+                f"Task title: {title}\n\nEnter due date (optional, press Enter to skip):\nFormats: 'tomorrow', 'today', 'DD MM YY', or '+3d'"
+            )
 
     def _handle_task_due_date_input(self, due_date_str: str) -> None:
         """Handle task due date input.
@@ -400,7 +662,8 @@ Status: Iteration 3 - Task Lifecycle Management
         )
 
         if task_id:
-            self.refresh_current_panel()
+            # Refresh the panel for the role we just added a task to
+            self.refresh_panel_for_role(self.active_role_id)
         else:
             self.show_error("Failed to create task")
 
@@ -413,6 +676,9 @@ Status: Iteration 3 - Task Lifecycle Management
         Args:
             message: Error message to display
         """
+        # Don't show messages in multi-panel mode - they would replace the grid
+        if self.in_multi_panel_mode:
+            return
         self.update_content(f"[red]Error:[/red] {message}")
 
     def show_success(self, message: str) -> None:
@@ -421,6 +687,9 @@ Status: Iteration 3 - Task Lifecycle Management
         Args:
             message: Success message to display
         """
+        # Don't show messages in multi-panel mode - they would replace the grid
+        if self.in_multi_panel_mode:
+            return
         self.update_content(f"[green]Success:[/green] {message}")
 
     def update_content(self, text: str) -> None:
@@ -429,7 +698,21 @@ Status: Iteration 3 - Task Lifecycle Management
         Args:
             text: Text to display
         """
-        self.main_content.update(text)
+        # If in multi-panel mode, switch back to single-panel mode for messages
+        if self.in_multi_panel_mode and isinstance(self.main_content, MultiPanelGrid):
+            # Remove multi-panel grid
+            self.main_content.remove()
+            self.multi_panel_grid = None
+            self.in_multi_panel_mode = False
+
+            # Create new MainContent static widget
+            new_content = MainContent()
+            self.main_content = new_content
+            self.mount(new_content, before=0)
+
+        # Now update with text
+        if hasattr(self.main_content, 'update'):
+            self.main_content.update(text)
 
     def handle_task_command(self, args: dict) -> None:
         """Handle task-related commands.
@@ -506,7 +789,8 @@ Status: Iteration 3 - Task Lifecycle Management
         """
         success = task_commands.update_task_status(task['id'], status)
         if success:
-            self.refresh_current_panel()
+            # Refresh the panel for this task's role
+            self.refresh_panel_for_role(task['role_id'])
         else:
             self.show_error(f"Failed to update task status to {status}")
 
@@ -519,15 +803,10 @@ Status: Iteration 3 - Task Lifecycle Management
         self._pending_delete_task = task
         self._awaiting_delete_confirmation = True
 
-        # Show confirmation prompt
+        # Show confirmation prompt in placeholder only (keeps layout intact)
         task_title = task['title']
         task_num = task['task_number']
-        self.update_content(
-            f"Are you sure you want to delete task t{task_num}?\n"
-            f"'{task_title}'\n\n"
-            f"Type 'yes' to confirm or 'no' to cancel:"
-        )
-        self.command_input.placeholder = "yes or no?"
+        self.command_input.placeholder = f"Delete t{task_num} '{task_title}'? Type 'yes' or 'no'"
 
     def _handle_delete_confirmation(self, response: str) -> None:
         """Handle delete confirmation response.
@@ -545,15 +824,11 @@ Status: Iteration 3 - Task Lifecycle Management
             task = self._pending_delete_task
             task_commands.delete_task(task['id'], save_to_undo=True)
 
-            # Show success message
-            self.show_success(f"Task t{task['task_number']} deleted. Use 'undo' to restore.")
-
-            # Refresh panel
-            self.refresh_current_panel()
+            # Refresh the panel for this task's role
+            self.refresh_panel_for_role(task['role_id'])
         else:
-            # Cancelled
-            self.show_success("Delete cancelled")
-            self.refresh_current_panel()
+            # Cancelled - just refresh to show task still there
+            self.refresh_panel_for_role(self._pending_delete_task['role_id'])
 
         # Clean up
         self._pending_delete_task = None
@@ -563,13 +838,8 @@ Status: Iteration 3 - Task Lifecycle Management
         restored_task = task_commands.undo_last_deletion()
 
         if restored_task:
-            task_num = restored_task['task_number']
-            task_title = restored_task['title']
-            self.show_success(f"Restored task t{task_num}: '{task_title}'")
-
-            # Refresh panel if restored task belongs to active role
-            if self.active_role_id == restored_task['role_id']:
-                self.refresh_current_panel()
+            # Refresh the panel for the restored task's role
+            self.refresh_panel_for_role(restored_task['role_id'])
         else:
             self.show_error("No deletions to undo")
 
@@ -582,17 +852,9 @@ Status: Iteration 3 - Task Lifecycle Management
         self._pending_edit_task = task
         self._awaiting_edit_title = True
 
-        # Show current values and prompt
+        # Show prompt in placeholder only (keeps layout intact)
         current_title = task['title']
-        current_due_date = task['due_date']
-        due_date_display = f" (current: {current_due_date})" if current_due_date else " (no due date set)"
-
-        self.update_content(
-            f"Editing task t{task['task_number']}\n\n"
-            f"Current title: {current_title}\n"
-            f"Enter new title (or press Enter to keep current):"
-        )
-        self.command_input.placeholder = "New title or Enter to skip..."
+        self.command_input.placeholder = f"Edit t{task['task_number']} title (current: '{current_title}') or Enter to skip..."
 
     def _handle_edit_title_input(self, title: str) -> None:
         """Handle edit title input.
@@ -606,17 +868,11 @@ Status: Iteration 3 - Task Lifecycle Management
         task = self._pending_edit_task
         new_title = title.strip() if title.strip() else None
 
-        # Move to due date prompt
+        # Move to due date prompt (use placeholder only)
         current_due_date = task['due_date']
         due_date_display = current_due_date if current_due_date else "none"
 
-        self.update_content(
-            f"Current due date: {due_date_display}\n"
-            f"Enter new due date (or press Enter to keep current):\n"
-            f"Formats: 'tomorrow', 'today', 'DD MM YY', or '+3d'\n"
-            f"Type 'clear' to remove due date"
-        )
-        self.command_input.placeholder = "New due date or Enter to skip..."
+        self.command_input.placeholder = f"Edit due date (current: {due_date_display}) - today/tomorrow/'clear'/Enter to skip..."
         self._awaiting_edit_due_date = True
 
         # Store the new title temporarily
@@ -651,8 +907,8 @@ Status: Iteration 3 - Task Lifecycle Management
         )
 
         if success:
-            self.show_success(f"Task t{task['task_number']} updated")
-            self.refresh_current_panel()
+            # Refresh the panel for this task's role
+            self.refresh_panel_for_role(task['role_id'])
         else:
             self.show_error("Failed to update task")
 
