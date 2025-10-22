@@ -72,13 +72,23 @@ class MultiPanelGrid(Container):
         height: 100%;
     }
 
-    MultiPanelGrid Horizontal {
+    MultiPanelGrid > Horizontal {
         width: 100%;
         height: 100%;
     }
 
-    MultiPanelGrid Vertical {
+    MultiPanelGrid > Vertical {
         width: 100%;
+        height: 100%;
+    }
+
+    MultiPanelGrid Vertical Horizontal {
+        width: 100%;
+        height: 1fr;
+    }
+
+    MultiPanelGrid Horizontal Vertical {
+        width: 1fr;
         height: 100%;
     }
 

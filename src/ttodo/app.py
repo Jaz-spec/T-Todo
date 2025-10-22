@@ -11,7 +11,9 @@ from ttodo.database.migrations import initialize_database
 from ttodo.ui.panels import RolePanel
 from ttodo.ui.task_detail import render_task_detail
 from ttodo.ui.multi_panel_grid import MultiPanelGrid
+from ttodo.ui.kanban import KanbanBoard
 from ttodo.utils.colors import ROLE_COLORS, get_role_color
+from ttodo.utils.archive import ArchiveScheduler
 import re
 
 
@@ -79,6 +81,18 @@ class TodoApp(App):
     .success {
         color: $success;
     }
+
+    .kanban-board {
+        width: 100%;
+        height: 100%;
+        background: transparent;
+    }
+
+    .kanban-column {
+        width: 1fr;
+        height: 100%;
+        margin: 0 1;
+    }
     """
 
     BINDINGS = [
@@ -115,6 +129,17 @@ class TodoApp(App):
         self._awaiting_edit_due_date = False
         self._pending_edit_task = None
 
+        # Kanban view state
+        self._in_kanban_view = False  # Track if we're in kanban view
+        self._saved_window_layout = None  # Store window layout when entering kanban
+
+        # Help view state
+        self._in_help_view = False  # Track if we're in help view
+        self._pre_help_state = None  # Store state before showing help
+
+        # Archive scheduler for auto-archiving completed tasks
+        self.archive_scheduler = ArchiveScheduler(interval_hours=1)
+
     def compose(self) -> ComposeResult:
         """Compose the UI layout."""
         self.main_content = MainContent()
@@ -137,6 +162,9 @@ class TodoApp(App):
         if layout:
             panel_count, panel_roles = layout
             self._create_multi_panel_layout(panel_count, panel_roles)
+
+        # Start archive scheduler for automatic cleanup
+        self.archive_scheduler.start()
 
         # Focus the input
         self.command_input.focus()
@@ -217,7 +245,7 @@ class TodoApp(App):
 
         # Exit command
         if command == "exit":
-            self.exit()
+            self.action_quit()
             return
 
         # Help command
@@ -276,6 +304,22 @@ class TodoApp(App):
             self.close_focused_panel()
             return
 
+        # Kanban view command
+        elif command == "k":
+            self.enter_kanban_view()
+            return
+
+        # Return to previous view command (also handles 'r' without number)
+        elif command == "r" and not args.get("parts"):
+            # Priority: Exit help view, then exit kanban view
+            if self._in_help_view:
+                self.exit_help_view()
+            elif self._in_kanban_view:
+                self.exit_kanban_view()
+            else:
+                self.show_error("Already in default view. Use 'k' for kanban or 'help' for help.")
+            return
+
         # Empty command
         elif command == "empty":
             pass
@@ -288,6 +332,18 @@ class TodoApp(App):
 
     def show_help(self) -> None:
         """Display help information."""
+        # Save current state before showing help
+        if not self._in_help_view:
+            self._pre_help_state = {
+                'in_kanban_view': self._in_kanban_view,
+                'in_multi_panel_mode': self.in_multi_panel_mode,
+                'active_role_id': self.active_role_id,
+                'current_panel': self.current_panel,
+                'multi_panel_grid': self.multi_panel_grid,
+                'saved_window_layout': self._saved_window_layout
+            }
+            self._in_help_view = True
+
         help_text = """
 Terminal Todo - Help
 
@@ -304,6 +360,10 @@ Task Management:
   t[number] done       Mark task as completed (e.g., t5 done)
   t[number] todo       Mark task as to-do (e.g., t6 todo)
 
+View Modes:
+  k                    Switch to kanban board view (TODO | DOING | DONE columns)
+  r                    Return to previous view (from help or kanban)
+
 Window Management:
   window [1-8]         Create multi-panel layout (e.g., window 2, window 4)
   close                Close currently focused panel
@@ -319,7 +379,9 @@ Keyboard Shortcuts:
   Esc                  Clear command input
   Tab                  Focus next panel (in multi-panel mode)
 
-Status: Iteration 4 - Window Management
+Status: Iteration 5 - Kanban View
+
+Press 'r' to return to previous view
 """
         self.update_content(help_text)
 
@@ -376,8 +438,11 @@ Status: Iteration 4 - Window Management
         self.active_role_id = role["id"]
         self.update_command_placeholder()
 
+        # If in kanban view, switch to this role's kanban
+        if self._in_kanban_view:
+            self._switch_kanban_role(role)
         # Only display in single-panel mode
-        if not self.in_multi_panel_mode:
+        elif not self.in_multi_panel_mode:
             self.display_role_panel(role)
 
     def display_role_panel(self, role) -> None:
@@ -430,9 +495,169 @@ Status: Iteration 4 - Window Management
                 if panel_container.role_id == role_id:
                     panel_container.refresh_panel()
                     break
+        elif self._in_kanban_view and self.current_panel:
+            # Refresh kanban board if it's a KanbanBoard instance
+            if isinstance(self.current_panel, KanbanBoard) and self.current_panel.role_id == role_id:
+                self.current_panel.refresh_columns()
         elif self.current_panel and self.active_role_id == role_id:
             # Refresh single panel if it matches
             self.main_content.update(self.current_panel.render())
+
+    # Kanban View Methods
+
+    def enter_kanban_view(self) -> None:
+        """Switch to kanban board view for the active role."""
+        if not self.active_role_id:
+            self.show_error("No role selected. Use 'r1' to select a role first.")
+            return
+
+        # Get role details
+        role = role_commands.get_role_by_id(self.active_role_id)
+        if not role:
+            self.show_error("Active role not found.")
+            return
+
+        # Store current window layout if in multi-panel mode
+        if self.in_multi_panel_mode:
+            # Save current multi-panel state to restore later
+            self._saved_window_layout = {
+                'panel_count': len(self.multi_panel_grid.panel_containers) if self.multi_panel_grid else 0,
+                'panel_roles': [pc.role_id for pc in self.multi_panel_grid.panel_containers] if self.multi_panel_grid else []
+            }
+            # Remove multi-panel grid
+            if self.multi_panel_grid:
+                self.multi_panel_grid.remove()
+
+            # Create new MainContent static widget
+            new_content = MainContent()
+            self.main_content = new_content
+            self.mount(new_content, before=0)
+
+            self.multi_panel_grid = None
+            self.in_multi_panel_mode = False
+        else:
+            # In single-panel mode, just clear content
+            if hasattr(self.current_panel, 'remove') and self.current_panel:
+                self.current_panel.remove()
+
+        # Create and mount kanban board
+        kanban_board = KanbanBoard(
+            role_id=role['id'],
+            role_name=role['name'],
+            display_number=role['display_number'],
+            color=role['color']
+        )
+
+        # Update state
+        self._in_kanban_view = True
+        self.current_panel = kanban_board
+
+        # Mount kanban board in main content container
+        self.main_content.mount(kanban_board)
+
+    def exit_kanban_view(self) -> None:
+        """Return to window layout from kanban view."""
+        if not self._in_kanban_view:
+            return
+
+        # Remove kanban board
+        if self.current_panel:
+            self.current_panel.remove()
+            self.current_panel = None
+
+        # Update state
+        self._in_kanban_view = False
+
+        # Restore saved window layout
+        if self._saved_window_layout and self._saved_window_layout['panel_count'] > 0:
+            panel_count = self._saved_window_layout['panel_count']
+            panel_roles = self._saved_window_layout['panel_roles']
+            self._create_multi_panel_layout(panel_count, panel_roles)
+            self._saved_window_layout = None
+        else:
+            # No saved layout, check if there's a default layout in database
+            layout = window_commands.load_window_layout()
+            if layout:
+                panel_count, panel_roles = layout
+                self._create_multi_panel_layout(panel_count, panel_roles)
+            else:
+                # No layout at all, show welcome message
+                self.main_content.update("Welcome to Terminal Todo!\n\nType 'window 2' to create a window layout, or 'help' for commands.")
+
+    def _switch_kanban_role(self, role) -> None:
+        """Switch to a different role's kanban board while staying in kanban view.
+
+        Args:
+            role: Role database row to switch to
+        """
+        # Remove current kanban board
+        if self.current_panel:
+            self.current_panel.remove()
+
+        # Create new kanban board for the selected role
+        kanban_board = KanbanBoard(
+            role_id=role['id'],
+            role_name=role['name'],
+            display_number=role['display_number'],
+            color=role['color']
+        )
+
+        # Update current panel reference
+        self.current_panel = kanban_board
+
+        # Mount new kanban board
+        self.main_content.mount(kanban_board)
+
+    # Help View Methods
+
+    def exit_help_view(self) -> None:
+        """Return to the view that was active before help was displayed."""
+        if not self._in_help_view or not self._pre_help_state:
+            return
+
+        # Clear help state
+        self._in_help_view = False
+        state = self._pre_help_state
+        self._pre_help_state = None
+
+        # Restore previous view based on saved state
+        if state['in_kanban_view']:
+            # Restore kanban view
+            self._in_kanban_view = True
+            self.current_panel = state['current_panel']
+            self._saved_window_layout = state['saved_window_layout']
+
+            # Get role for kanban board
+            if self.active_role_id:
+                role = role_commands.get_role_by_id(self.active_role_id)
+                if role:
+                    # Create fresh kanban board
+                    kanban_board = KanbanBoard(
+                        role_id=role['id'],
+                        role_name=role['name'],
+                        display_number=role['display_number'],
+                        color=role['color']
+                    )
+                    self.current_panel = kanban_board
+                    self.main_content.mount(kanban_board)
+        elif state['in_multi_panel_mode'] and state['multi_panel_grid']:
+            # Restore multi-panel layout
+            self.in_multi_panel_mode = True
+            self.multi_panel_grid = state['multi_panel_grid']
+
+            # Load layout from database and recreate
+            layout = window_commands.load_window_layout()
+            if layout:
+                panel_count, panel_roles = layout
+                self._create_multi_panel_layout(panel_count, panel_roles)
+        else:
+            # Restore single panel view
+            if self.active_role_id:
+                role = role_commands.get_role_by_id(self.active_role_id)
+                if role:
+                    self.display_role_panel(role)
+            else:
+                self.main_content.update("Welcome to Terminal Todo!\n\nType 'window 2' to create a window layout, or 'help' for commands.")
 
     # Window Management Methods
 
@@ -614,8 +839,8 @@ Or press Enter to leave panel empty"""
         self.command_input.placeholder = "Enter task title..."
         self._awaiting_task_title = True
 
-        # Only update content in single-panel mode
-        if not self.in_multi_panel_mode:
+        # Only update content in single-panel mode (not in multi-panel or kanban)
+        if not self.in_multi_panel_mode and not self._in_kanban_view:
             self.update_content(
                 "Creating new task...\n\nEnter task title in the command box below:"
             )
@@ -639,8 +864,8 @@ Or press Enter to leave panel empty"""
         self._awaiting_task_due_date = True
         self.command_input.placeholder = "Due date (today/tomorrow/DD MM YY or Enter to skip)..."
 
-        # Only update content in single-panel mode
-        if not self.in_multi_panel_mode:
+        # Only update content in single-panel mode (not in multi-panel or kanban)
+        if not self.in_multi_panel_mode and not self._in_kanban_view:
             self.update_content(
                 f"Task title: {title}\n\nEnter due date (optional, press Enter to skip):\nFormats: 'tomorrow', 'today', 'DD MM YY', or '+3d'"
             )
@@ -698,6 +923,12 @@ Or press Enter to leave panel empty"""
         Args:
             text: Text to display
         """
+        # If in kanban view, remove kanban board first
+        if self._in_kanban_view and self.current_panel:
+            self.current_panel.remove()
+            self.current_panel = None
+            self._in_kanban_view = False
+
         # If in multi-panel mode, switch back to single-panel mode for messages
         if self.in_multi_panel_mode and isinstance(self.main_content, MultiPanelGrid):
             # Remove multi-panel grid
@@ -922,7 +1153,13 @@ Or press Enter to leave panel empty"""
 
     def action_quit(self) -> None:
         """Quit the application."""
+        # Stop the archive scheduler
+        self.archive_scheduler.stop()
+
+        # Close database connection
         db.close()
+
+        # Exit the app
         self.exit()
 
 
