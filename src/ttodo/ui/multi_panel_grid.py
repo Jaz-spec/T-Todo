@@ -46,7 +46,8 @@ class PanelContainer(Static):
         self.is_focused = focused
         if self.role_panel:
             self.role_panel.is_active = focused
-            self.update(self.role_panel.render())
+        # Always recreate panel to update styling
+        self._create_panel()
 
     def refresh_panel(self):
         """Refresh the panel content by recreating it."""
@@ -253,3 +254,36 @@ class MultiPanelGrid(Container):
         """Refresh all panels."""
         for panel in self.panel_containers:
             panel.refresh_panel()
+
+    def swap_panels(self, index1: int, index2: int):
+        """Swap two panels' positions and roles.
+
+        Args:
+            index1: First panel index
+            index2: Second panel index
+        """
+        if not (0 <= index1 < len(self.panel_containers) and
+                0 <= index2 < len(self.panel_containers)):
+            return
+
+        # Swap the role_ids
+        self.panel_containers[index1].role_id, self.panel_containers[index2].role_id = \
+            self.panel_containers[index2].role_id, self.panel_containers[index1].role_id
+
+        # Update panel_roles list
+        self.panel_roles[index1], self.panel_roles[index2] = \
+            self.panel_roles[index2], self.panel_roles[index1]
+
+        # Refresh both panels to show new roles
+        self.panel_containers[index1].refresh_panel()
+        self.panel_containers[index2].refresh_panel()
+
+        # Update focused panel index to follow the moved panel
+        if self.focused_panel_index == index1:
+            self.panel_containers[index1].set_focus(False)
+            self.focused_panel_index = index2
+            self.panel_containers[index2].set_focus(True)
+        elif self.focused_panel_index == index2:
+            self.panel_containers[index2].set_focus(False)
+            self.focused_panel_index = index1
+            self.panel_containers[index1].set_focus(True)

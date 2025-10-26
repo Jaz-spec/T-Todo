@@ -114,3 +114,63 @@ def get_next_color_index() -> int:
     role_count = db.fetchone("SELECT COUNT(*) as count FROM roles")
     count = role_count['count'] if role_count else 0
     return count % len(ROLE_COLORS)
+
+
+def remap_role_numbers(role_mappings: dict) -> bool:
+    """Remap role display numbers.
+
+    Args:
+        role_mappings: Dict mapping role_id to new display_number
+
+    Returns:
+        True if successful, False otherwise
+    """
+    try:
+        # Use a temporary negative offset to avoid unique constraint violations
+        # First, set all to negative values
+        for role_id, new_number in role_mappings.items():
+            db.execute(
+                "UPDATE roles SET display_number = ? WHERE id = ?",
+                (-new_number, role_id)
+            )
+
+        # Then set all to positive values
+        for role_id, new_number in role_mappings.items():
+            db.execute(
+                "UPDATE roles SET display_number = ? WHERE id = ?",
+                (new_number, role_id)
+            )
+
+        db.commit()
+        return True
+    except Exception as e:
+        db.rollback()
+        return False
+
+
+def get_role(role_id: int):
+    """Get role by ID (alias for get_role_by_id for consistency).
+
+    Args:
+        role_id: Role ID
+
+    Returns:
+        Role row or None
+    """
+    return get_role_by_id(role_id)
+
+
+def role_has_tasks(role_id: int) -> bool:
+    """Check if a role has any tasks.
+
+    Args:
+        role_id: Role ID
+
+    Returns:
+        True if role has tasks, False otherwise
+    """
+    task_count = db.fetchone(
+        "SELECT COUNT(*) as count FROM tasks WHERE role_id = ?",
+        (role_id,)
+    )
+    return task_count and task_count['count'] > 0

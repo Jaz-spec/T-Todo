@@ -12,7 +12,7 @@ from ttodo.ui.panels import RolePanel
 from ttodo.ui.task_detail import render_task_detail
 from ttodo.ui.multi_panel_grid import MultiPanelGrid
 from ttodo.ui.kanban import KanbanBoard
-from ttodo.utils.colors import ROLE_COLORS, get_role_color
+from ttodo.utils.colors import ROLE_COLORS, get_role_color, get_active_color
 from ttodo.utils.archive import ArchiveScheduler
 import re
 
@@ -34,6 +34,15 @@ class CommandInput(Input):
             if len(self.command_history) > 50:  # Max 50 commands
                 self.command_history.pop(0)
         self.history_index = len(self.command_history)
+
+    def _on_key(self, event) -> None:
+        """Override to prevent Input from consuming Tab key."""
+        # Let Tab pass through to app-level bindings - don't handle it at all
+        if event.key == "tab":
+            # Don't call prevent_default or stop - let it bubble up
+            return
+        # Let parent handle other keys
+        super()._on_key(event)
 
 
 class MainContent(Static):
@@ -98,7 +107,7 @@ class TodoApp(App):
     BINDINGS = [
         Binding("ctrl+c", "quit", "Quit", show=True),
         Binding("escape", "clear_input", "Clear", show=False),
-        Binding("tab", "focus_next_panel", "Next Panel", show=False),
+        Binding("tab", "focus_next_panel", "Next Panel", show=False, priority=True),
     ]
 
     def __init__(self):
@@ -137,6 +146,18 @@ class TodoApp(App):
         self._in_help_view = False  # Track if we're in help view
         self._pre_help_state = None  # Store state before showing help
 
+        # Navigation mode state
+        self._in_navigation_mode = False  # Track if in navigation mode
+        self._space_pressed = False  # Track if space is currently held down
+
+        # Role remap state
+        self._awaiting_role_remap = False  # Track if awaiting role remap input
+        self._role_remap_roles = []  # List of roles to remap
+
+        # Role delete state
+        self._awaiting_role_delete_confirmation = False  # Track if awaiting delete confirmation
+        self._pending_delete_role = None  # Role to be deleted
+
         # Archive scheduler for auto-archiving completed tasks
         self.archive_scheduler = ArchiveScheduler(interval_hours=1)
 
@@ -168,6 +189,332 @@ class TodoApp(App):
 
         # Focus the input
         self.command_input.focus()
+
+    def on_key(self, event) -> None:
+        """Handle key presses for navigation mode and command history."""
+        # Check if we're waiting for specific input - don't enter nav mode
+        if (self._awaiting_role_name or self._awaiting_task_title or
+            self._awaiting_task_due_date or self._awaiting_delete_confirmation or
+            self._awaiting_edit_title or self._awaiting_edit_due_date or
+            self._awaiting_window_role_selection or self._in_task_detail_view or
+            self._awaiting_role_remap or self._awaiting_role_delete_confirmation):
+            # Allow normal text input
+            return
+
+        key = event.key
+
+        # Tab key - let it pass through to the binding system for focus_next_panel
+        if key == "tab":
+            # Don't handle it here, let the binding system handle it
+            return
+
+        # Space key handling - track press/release for panel movement
+        if key == "space":
+            self._space_pressed = True
+            if self._in_navigation_mode:
+                # Consume space in nav mode to prevent it from going to input
+                event.prevent_default()
+                event.stop()
+            return
+
+        # Handle Escape - toggle to navigation mode
+        if key == "escape":
+            if self.command_input.value:
+                # If there's text in input, ESC clears it (default behavior)
+                return
+            else:
+                # Enter navigation mode
+                if not self._in_navigation_mode:
+                    self._enter_navigation_mode()
+                    event.prevent_default()
+                    event.stop()
+                return
+
+        # If in navigation mode, handle navigation keys
+        if self._in_navigation_mode:
+            handled = self._handle_navigation_key(key)
+            if handled:
+                event.prevent_default()
+                event.stop()
+                return
+
+        # If in command mode, handle command history with arrow keys
+        if not self._in_navigation_mode:
+            if key == "up":
+                self._command_history_up()
+                event.prevent_default()
+                event.stop()
+                return
+            elif key == "down":
+                self._command_history_down()
+                event.prevent_default()
+                event.stop()
+                return
+
+        # Any letter key exits navigation mode and returns to command mode
+        if self._in_navigation_mode and len(key) == 1 and key.isalpha():
+            self._exit_navigation_mode()
+            # Don't prevent default - allow the letter to go to input
+            return
+
+    def _enter_navigation_mode(self) -> None:
+        """Enter navigation mode."""
+        self._in_navigation_mode = True
+        self._update_input_placeholder()
+        # Blur the input so it doesn't capture keys
+        self.set_focus(None)
+
+    def _exit_navigation_mode(self) -> None:
+        """Exit navigation mode and return to command mode."""
+        self._in_navigation_mode = False
+        self._space_pressed = False
+        self._update_input_placeholder()
+        # Focus the input
+        self.command_input.focus()
+
+    def _update_input_placeholder(self) -> None:
+        """Update the input placeholder to show current mode."""
+        if self._in_navigation_mode:
+            self.command_input.placeholder = "(nav) - Use arrow keys to scroll, Space+Arrow to move panels, any letter to return to command mode"
+        else:
+            # Restore normal placeholder
+            if self.active_role_id:
+                role = role_commands.get_role(self.active_role_id)
+                if role:
+                    self.command_input.placeholder = f"r{role['display_number']} - Type a command... (type 'help' for commands)"
+                else:
+                    self.command_input.placeholder = "Type a command... (type 'help' for commands)"
+            else:
+                self.command_input.placeholder = "Type a command... (type 'help' for commands)"
+
+    def _handle_navigation_key(self, key: str) -> bool:
+        """Handle navigation keys when in navigation mode.
+
+        Returns:
+            True if key was handled, False otherwise
+        """
+        # Arrow keys for scrolling (without space) or movement (with space)
+        if key in ("up", "down", "left", "right"):
+            if self._space_pressed:
+                # Space + Arrow = move panel position
+                return self._move_panel(key)
+            else:
+                # Arrow alone = scroll focused panel
+                return self._scroll_panel(key)
+
+        return False
+
+    def _scroll_panel(self, direction: str) -> bool:
+        """Scroll the focused panel.
+
+        Args:
+            direction: One of "up", "down", "left", "right"
+
+        Returns:
+            True if scrolling was performed
+        """
+        # Get the focused panel
+        if self.in_multi_panel_mode and self.multi_panel_grid:
+            focused_panel = self.multi_panel_grid.get_focused_panel()
+            if focused_panel and hasattr(focused_panel, 'scroll_relative'):
+                if direction == "up":
+                    focused_panel.scroll_relative(y=-1)
+                    return True
+                elif direction == "down":
+                    focused_panel.scroll_relative(y=1)
+                    return True
+                elif direction == "left":
+                    focused_panel.scroll_relative(x=-1)
+                    return True
+                elif direction == "right":
+                    focused_panel.scroll_relative(x=1)
+                    return True
+        elif self.current_panel and hasattr(self.current_panel, 'scroll_relative'):
+            # Single panel mode
+            if direction == "up":
+                self.current_panel.scroll_relative(y=-1)
+                return True
+            elif direction == "down":
+                self.current_panel.scroll_relative(y=1)
+                return True
+            elif direction == "left":
+                self.current_panel.scroll_relative(x=-1)
+                return True
+            elif direction == "right":
+                self.current_panel.scroll_relative(x=1)
+                return True
+
+        return False
+
+    def _move_panel(self, direction: str) -> bool:
+        """Move the focused panel in the given direction (swap positions).
+
+        Args:
+            direction: One of "up", "down", "left", "right"
+
+        Returns:
+            True if panel was moved
+        """
+        if not self.in_multi_panel_mode or not self.multi_panel_grid:
+            return False
+
+        # Get current focused panel index
+        focused_index = self.multi_panel_grid.focused_panel_index
+        if focused_index is None:
+            return False
+
+        # Calculate target index based on direction and layout
+        panel_count = len(self.multi_panel_grid.panel_containers)
+        target_index = self._calculate_target_panel_index(focused_index, direction, panel_count)
+
+        if target_index is None or target_index == focused_index:
+            return False
+
+        # Swap the panels
+        self.multi_panel_grid.swap_panels(focused_index, target_index)
+
+        # Update database with new layout
+        panel_roles = [pc.role_id for pc in self.multi_panel_grid.panel_containers]
+        window_commands.save_window_layout(panel_count, panel_roles)
+
+        return True
+
+    def _calculate_target_panel_index(self, current_index: int, direction: str, panel_count: int) -> int:
+        """Calculate the target panel index based on direction and layout.
+
+        Args:
+            current_index: Current panel index
+            direction: One of "up", "down", "left", "right"
+            panel_count: Total number of panels
+
+        Returns:
+            Target panel index or None if no valid move
+        """
+        # Layout-specific logic based on panel_count
+        # 1 panel: no movement
+        if panel_count == 1:
+            return None
+
+        # 2 panels: left-right only
+        if panel_count == 2:
+            if direction == "left":
+                return 0 if current_index == 1 else None
+            elif direction == "right":
+                return 1 if current_index == 0 else None
+            return None
+
+        # 3 panels: left (0) + right top (1) + right bottom (2)
+        if panel_count == 3:
+            if direction == "left":
+                return 0 if current_index in (1, 2) else None
+            elif direction == "right":
+                return 1 if current_index == 0 else None
+            elif direction == "up":
+                return 1 if current_index == 2 else None
+            elif direction == "down":
+                return 2 if current_index == 1 else None
+            return None
+
+        # 4 panels: 2x2 grid - [0][1]
+        #                       [2][3]
+        if panel_count == 4:
+            if direction == "left":
+                return {1: 0, 3: 2}.get(current_index)
+            elif direction == "right":
+                return {0: 1, 2: 3}.get(current_index)
+            elif direction == "up":
+                return {2: 0, 3: 1}.get(current_index)
+            elif direction == "down":
+                return {0: 2, 1: 3}.get(current_index)
+            return None
+
+        # 5 panels: left (0) + right 3 stacked (1, 2, 3)
+        if panel_count == 5:
+            if direction == "left":
+                return 0 if current_index in (1, 2, 3) else None
+            elif direction == "right":
+                return 1 if current_index == 0 else None
+            elif direction == "up":
+                if current_index == 2:
+                    return 1
+                elif current_index == 3:
+                    return 2
+            elif direction == "down":
+                if current_index == 1:
+                    return 2
+                elif current_index == 2:
+                    return 3
+            return None
+
+        # 6 panels: 2x3 grid - [0][1]
+        #                       [2][3]
+        #                       [4][5]
+        if panel_count == 6:
+            if direction == "left":
+                return {1: 0, 3: 2, 5: 4}.get(current_index)
+            elif direction == "right":
+                return {0: 1, 2: 3, 4: 5}.get(current_index)
+            elif direction == "up":
+                return {2: 0, 3: 1, 4: 2, 5: 3}.get(current_index)
+            elif direction == "down":
+                return {0: 2, 1: 3, 2: 4, 3: 5}.get(current_index)
+            return None
+
+        # 7 panels: left 3 stacked (0, 1, 2) + right 4 stacked (3, 4, 5, 6)
+        if panel_count == 7:
+            if direction == "left":
+                return 0 if current_index in (3, 4, 5, 6) else None
+            elif direction == "right":
+                return 3 if current_index in (0, 1, 2) else None
+            elif direction == "up":
+                if current_index in (1, 4):
+                    return current_index - 1
+                elif current_index in (2, 5):
+                    return current_index - 1
+                elif current_index == 6:
+                    return 5
+            elif direction == "down":
+                if current_index in (0, 3):
+                    return current_index + 1
+                elif current_index in (1, 4):
+                    return current_index + 1
+                elif current_index == 5:
+                    return 6
+            return None
+
+        # 8 panels: left 4 stacked (0, 1, 2, 3) + right 4 stacked (4, 5, 6, 7)
+        if panel_count == 8:
+            if direction == "left":
+                return current_index - 4 if current_index in (4, 5, 6, 7) else None
+            elif direction == "right":
+                return current_index + 4 if current_index in (0, 1, 2, 3) else None
+            elif direction == "up":
+                if current_index in (1, 2, 3, 5, 6, 7):
+                    return current_index - 1
+            elif direction == "down":
+                if current_index in (0, 1, 2, 4, 5, 6):
+                    return current_index + 1
+            return None
+
+        return None
+
+    def _command_history_up(self) -> None:
+        """Navigate up in command history."""
+        if self.command_input.command_history:
+            if self.command_input.history_index > 0:
+                self.command_input.history_index -= 1
+                self.command_input.value = self.command_input.command_history[self.command_input.history_index]
+
+    def _command_history_down(self) -> None:
+        """Navigate down in command history."""
+        if self.command_input.command_history:
+            if self.command_input.history_index < len(self.command_input.command_history) - 1:
+                self.command_input.history_index += 1
+                self.command_input.value = self.command_input.command_history[self.command_input.history_index]
+            else:
+                # At the end of history, clear input
+                self.command_input.history_index = len(self.command_input.command_history)
+                self.command_input.value = ""
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         """Handle command submission."""
@@ -228,6 +575,14 @@ class TodoApp(App):
             self._handle_window_role_selection(command_str)
             return
 
+        if self._awaiting_role_remap:
+            self._handle_role_remap_input(command_str)
+            return
+
+        if self._awaiting_role_delete_confirmation:
+            self._handle_role_delete_confirmation(command_str)
+            return
+
         # Add to history
         self.command_input.add_to_history(command_str)
 
@@ -256,6 +611,16 @@ class TodoApp(App):
         # New role command
         elif command == "new" and parts and parts[0] == "role":
             self.create_new_role()
+            return
+
+        # Role remap command
+        elif command == "role" and parts and parts[0] == "remap":
+            self.start_role_remap()
+            return
+
+        # Delete command (role or task)
+        elif command == "delete":
+            self.start_delete_command()
             return
 
         # Role selection (r1, r2, etc.)
@@ -350,6 +715,8 @@ Terminal Todo - Help
 Role Management:
   new role             Create a new role (interactive prompts)
   r[number]            Select a role (e.g., r1, r2)
+  role remap           Reassign role numbers
+  delete               Delete the currently active role (must have no tasks)
 
 Task Management:
   add                  Add a task to the active role (interactive prompts)
@@ -376,10 +743,13 @@ Utility:
 
 Keyboard Shortcuts:
   Ctrl+C               Quit application
-  Esc                  Clear command input
+  Esc                  Enter navigation mode (when input is empty)
   Tab                  Focus next panel (in multi-panel mode)
+  Arrow keys           Command history (cmd mode) or scroll panel (nav mode)
+  Space+Arrow          Move panel position (in navigation mode)
+  Any letter           Exit navigation mode and return to command mode
 
-Status: Iteration 5 - Kanban View
+Status: Iteration 6 - Navigation Mode & Role Management
 
 Press 'r' to return to previous view
 """
@@ -422,6 +792,210 @@ Press 'r' to return to previous view
             self.display_role_panel(role)
         else:
             self.show_error("Failed to create role")
+
+    def start_role_remap(self) -> None:
+        """Start the role remap process."""
+        roles = role_commands.get_all_roles()
+        if not roles:
+            self.show_error("No roles to remap")
+            return
+
+        # Store roles for remapping
+        self._role_remap_roles = roles
+
+        # Build the remap display
+        remap_text = "Role Remap - Enter new numbers for roles\n\n"
+        remap_text += "Current mapping:\n"
+        for role in roles:
+            remap_text += f"  {role['display_number']}: {role['name']}\n"
+        remap_text += "\nEnter new mapping as: role_name:new_number\n"
+        remap_text += "Example: Work:3  or  Personal:1\n"
+        remap_text += "(Press Enter with empty input to cancel)\n"
+
+        self.update_content(remap_text)
+        self.command_input.placeholder = "Enter role:number (e.g., Work:3) or press Enter to finish..."
+        self._awaiting_role_remap = True
+
+    def _handle_role_remap_input(self, input_str: str) -> None:
+        """Handle role remap input.
+
+        Args:
+            input_str: Input string in format "role_name:new_number"
+        """
+        if not input_str or not input_str.strip():
+            # Empty input means we're done remapping
+            self._finish_role_remap()
+            return
+
+        # Parse input (role_name:new_number)
+        parts = input_str.strip().split(":")
+        if len(parts) != 2:
+            self.show_error("Invalid format. Use: role_name:new_number (e.g., Work:3)")
+            return
+
+        role_name = parts[0].strip()
+        try:
+            new_number = int(parts[1].strip())
+        except ValueError:
+            self.show_error(f"Invalid number: {parts[1]}")
+            return
+
+        # Find the role
+        role = None
+        for r in self._role_remap_roles:
+            if r['name'].lower() == role_name.lower():
+                role = r
+                break
+
+        if not role:
+            self.show_error(f"Role not found: {role_name}")
+            return
+
+        # Check if new number is already taken
+        for r in self._role_remap_roles:
+            if r['display_number'] == new_number and r['id'] != role['id']:
+                self.show_error(f"Number {new_number} is already assigned to {r['name']}")
+                return
+
+        # Update the role's display number in our temporary list
+        role['display_number'] = new_number
+
+        # Show updated mapping
+        remap_text = "Role Remap - Enter new numbers for roles\n\n"
+        remap_text += "Current mapping:\n"
+        for r in sorted(self._role_remap_roles, key=lambda x: x['display_number']):
+            remap_text += f"  {r['display_number']}: {r['name']}\n"
+        remap_text += "\nEnter new mapping as: role_name:new_number\n"
+        remap_text += "Example: Work:3  or  Personal:1\n"
+        remap_text += "(Press Enter with empty input to finish and save)\n"
+
+        self.update_content(remap_text)
+
+    def _finish_role_remap(self) -> None:
+        """Finish role remapping and save to database."""
+        self._awaiting_role_remap = False
+        self.command_input.placeholder = "Type a command... (type 'help' for commands)"
+
+        if not self._role_remap_roles:
+            return
+
+        # Build mapping dict
+        role_mappings = {role['id']: role['display_number'] for role in self._role_remap_roles}
+
+        # Save to database
+        success = role_commands.remap_role_numbers(role_mappings)
+
+        if success:
+            # Refresh all panels to show updated numbers
+            if self.in_multi_panel_mode and self.multi_panel_grid:
+                self.multi_panel_grid.refresh_all_panels()
+            elif self.active_role_id:
+                role = role_commands.get_role(self.active_role_id)
+                if role:
+                    self.display_role_panel(role)
+            else:
+                self.update_content("Welcome to Terminal Todo!\n\nType 'new role' to get started.")
+
+            # Update placeholder to reflect new numbers
+            self.update_command_placeholder()
+        else:
+            self.show_error("Failed to remap roles")
+
+        # Clean up
+        self._role_remap_roles = []
+
+    def start_delete_command(self) -> None:
+        """Start the delete command (role or task)."""
+        if not self.active_role_id:
+            self.show_error("No active role selected")
+            return
+
+        # Get the active role
+        role = role_commands.get_role(self.active_role_id)
+        if not role:
+            self.show_error("Active role not found")
+            return
+
+        # Check if role has tasks
+        if role_commands.role_has_tasks(self.active_role_id):
+            self.show_error(
+                f"Cannot delete role '{role['name']}'. "
+                "It has active tasks. Please delete or move tasks first."
+            )
+            return
+
+        # Ask for confirmation
+        self._pending_delete_role = role
+        self._awaiting_role_delete_confirmation = True
+        self.command_input.placeholder = f"Delete role '{role['name']}'? (yes/no)..."
+
+        # Show confirmation in content area
+        if not self.in_multi_panel_mode:
+            self.update_content(
+                f"Are you sure you want to delete role '{role['name']}'?\n\n"
+                f"Type 'yes' to confirm or 'no' to cancel."
+            )
+
+    def _handle_role_delete_confirmation(self, response: str) -> None:
+        """Handle role delete confirmation.
+
+        Args:
+            response: User response (yes/no)
+        """
+        self._awaiting_role_delete_confirmation = False
+        self.command_input.placeholder = "Type a command... (type 'help' for commands)"
+
+        if not self._pending_delete_role:
+            return
+
+        role = self._pending_delete_role
+        self._pending_delete_role = None
+
+        if response.lower() == "yes":
+            # Save to undo stack
+            import json
+            role_data = {
+                'type': 'role',
+                'role_id': role['id'],
+                'display_number': role['display_number'],
+                'name': role['name'],
+                'color': role['color']
+            }
+            db.execute(
+                "INSERT INTO undo_stack (action_type, data) VALUES (?, ?)",
+                ('delete_role', json.dumps(role_data))
+            )
+            db.commit()
+
+            # Delete the role
+            success = role_commands.delete_role(role['id'])
+
+            if success:
+                # Clear active role if it was the deleted one
+                if self.active_role_id == role['id']:
+                    self.active_role_id = None
+                    self.update_command_placeholder()
+
+                # Close any panels showing this role
+                if self.in_multi_panel_mode and self.multi_panel_grid:
+                    # Refresh all panels (will show empty for deleted role)
+                    self.multi_panel_grid.refresh_all_panels()
+                else:
+                    self.update_content("Welcome to Terminal Todo!\n\nType 'new role' to get started.")
+
+                # Show success message (briefly, then restore view)
+                # For now, just show in status or brief message
+            else:
+                self.show_error("Failed to delete role")
+        else:
+            # Cancelled - restore previous view
+            if not self.in_multi_panel_mode:
+                if self.active_role_id:
+                    role = role_commands.get_role(self.active_role_id)
+                    if role:
+                        self.display_role_panel(role)
+                else:
+                    self.update_content("Welcome to Terminal Todo!\n\nType 'new role' to get started.")
 
     def select_role(self, display_number: int) -> None:
         """Select a role by display number.
@@ -662,16 +1236,23 @@ Press 'r' to return to previous view
     # Window Management Methods
 
     def update_command_placeholder(self) -> None:
-        """Update role label to show active role."""
+        """Update role label and border color to show active role."""
         if self.active_role_id and self.input_container:
             role = role_commands.get_role_by_id(self.active_role_id)
             if role:
                 self.input_container.border_title = f"r{role['display_number']}"
+                # Update border color to match focused panel's role color (brightened)
+                border_color = get_active_color(role['color'])
+                # Update both border style and color
+                self.input_container.styles.border = ("round", border_color)
+                self.input_container.border_subtitle = f"Focus: {role['name']}"  # Debug
                 return
 
-        # Clear label when no role is active
+        # Clear label when no role is active - restore default border color
         if self.input_container:
             self.input_container.border_title = ""
+            self.input_container.styles.border = ("round", "#D4A574")
+            self.input_container.border_subtitle = ""  # Debug
 
     def create_window_layout(self, panel_count: int) -> None:
         """Start creating a multi-panel window layout.
@@ -827,8 +1408,9 @@ Or press Enter to leave panel empty"""
             new_role_id = self.multi_panel_grid.get_focused_role_id()
             if new_role_id:
                 self.active_role_id = new_role_id
+                self._update_input_placeholder()
                 self.update_command_placeholder()
-        # In single-panel mode, Tab does nothing (Textual default behavior)
+        # In single-panel mode, Tab does nothing
 
     def create_new_task(self) -> None:
         """Start task creation process."""
@@ -1065,12 +1647,45 @@ Or press Enter to leave panel empty"""
         self._pending_delete_task = None
 
     def undo_last_deletion(self) -> None:
-        """Undo the last deleted task."""
-        restored_task = task_commands.undo_last_deletion()
+        """Undo the last deleted task or role."""
+        import json
 
-        if restored_task:
-            # Refresh the panel for the restored task's role
-            self.refresh_panel_for_role(restored_task['role_id'])
+        # Get the last deletion from undo stack
+        last_deletion = db.fetchone(
+            "SELECT * FROM undo_stack ORDER BY id DESC LIMIT 1"
+        )
+
+        if not last_deletion:
+            self.show_error("No deletions to undo")
+            return
+
+        action_type = last_deletion['action_type']
+        data = json.loads(last_deletion['data'])
+
+        if action_type == 'delete_task':
+            # Restore task using existing method
+            restored_task = task_commands.undo_last_deletion()
+            if restored_task:
+                # Refresh the panel for the restored task's role
+                self.refresh_panel_for_role(restored_task['role_id'])
+        elif action_type == 'delete_role':
+            # Restore role
+            role_data = data
+            db.execute(
+                """INSERT INTO roles (id, display_number, name, color)
+                   VALUES (?, ?, ?, ?)""",
+                (role_data['role_id'], role_data['display_number'],
+                 role_data['name'], role_data['color'])
+            )
+            # Remove from undo stack
+            db.execute("DELETE FROM undo_stack WHERE id = ?", (last_deletion['id'],))
+            db.commit()
+
+            # Refresh view
+            if self.in_multi_panel_mode and self.multi_panel_grid:
+                self.multi_panel_grid.refresh_all_panels()
+            else:
+                self.update_content("Welcome to Terminal Todo!\n\nType 'new role' to get started.")
         else:
             self.show_error("No deletions to undo")
 
