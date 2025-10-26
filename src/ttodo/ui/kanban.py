@@ -4,9 +4,9 @@ from textual.containers import Horizontal
 from rich.text import Text
 from rich.panel import Panel as RichPanel
 from rich.console import Group
-from ttodo.commands.task_commands import get_tasks_for_role
+from ttodo.commands.task_commands import get_tasks_for_role, is_task_blocked
 from ttodo.utils.date_utils import format_relative_date
-from ttodo.utils.colors import get_active_color
+from ttodo.utils.colors import get_active_color, get_blocked_color
 
 
 class KanbanColumn(Static):
@@ -46,31 +46,35 @@ class KanbanColumn(Static):
         # Add tasks
         if tasks:
             for i, task in enumerate(tasks):
+                # Check if task is blocked - use dulled color if so
+                is_blocked = is_task_blocked(task['id'])
+                task_color = get_blocked_color(self.color) if is_blocked else self.color
+
                 # Task number and title
                 title_line = Text()
-                title_line.append(f"t{task['task_number']}: ", style=f"bold {self.color}")
-                title_line.append(task['title'], style=self.color)
+                title_line.append(f"t{task['task_number']}: ", style=f"bold {task_color}")
+                title_line.append(task['title'], style=task_color)
                 lines.append(title_line)
 
                 # Due date (if exists)
                 if task['due_date']:
                     due_line = Text()
-                    due_line.append("  Due: ", style=f"dim {self.color}")
-                    due_line.append(format_relative_date(task['due_date']), style=self.color)
+                    due_line.append("  Due: ", style=f"dim {task_color}")
+                    due_line.append(format_relative_date(task['due_date']), style=task_color)
                     lines.append(due_line)
 
                 # Priority (if exists)
                 if task['priority']:
                     pri_line = Text()
-                    pri_line.append("  Pri: ", style=f"dim {self.color}")
-                    pri_line.append(task['priority'], style=self.color)
+                    pri_line.append("  Pri: ", style=f"dim {task_color}")
+                    pri_line.append(task['priority'], style=task_color)
                     lines.append(pri_line)
 
                 # Story points (if exists)
                 if task['story_points']:
                     sp_line = Text()
-                    sp_line.append("  SP: ", style=f"dim {self.color}")
-                    sp_line.append(str(task['story_points']), style=self.color)
+                    sp_line.append("  SP: ", style=f"dim {task_color}")
+                    sp_line.append(str(task['story_points']), style=task_color)
                     lines.append(sp_line)
 
                 # Add spacing between cards

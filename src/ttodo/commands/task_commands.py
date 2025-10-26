@@ -308,3 +308,170 @@ def undo_last_deletion() -> Optional[dict]:
     db.commit()
 
     return task_data
+
+
+def add_task_dependency(task_id: int, blocks_task_id: int) -> bool:
+    """Add a blocking dependency between tasks.
+
+    Args:
+        task_id: ID of the task that blocks another
+        blocks_task_id: ID of the task being blocked
+
+    Returns:
+        True if successful, False otherwise
+    """
+    # Prevent self-blocking
+    if task_id == blocks_task_id:
+        return False
+
+    # Check for circular dependencies
+    if would_create_circular_dependency(task_id, blocks_task_id):
+        return False
+
+    try:
+        db.execute(
+            "INSERT INTO task_dependencies (task_id, blocks_task_id) VALUES (?, ?)",
+            (task_id, blocks_task_id)
+        )
+        db.commit()
+        return True
+    except Exception:
+        return False
+
+
+def remove_task_dependency(task_id: int, blocks_task_id: int) -> bool:
+    """Remove a blocking dependency between tasks.
+
+    Args:
+        task_id: ID of the task that blocks another
+        blocks_task_id: ID of the task being blocked
+
+    Returns:
+        True if successful, False otherwise
+    """
+    db.execute(
+        "DELETE FROM task_dependencies WHERE task_id = ? AND blocks_task_id = ?",
+        (task_id, blocks_task_id)
+    )
+    db.commit()
+    return True
+
+
+def get_tasks_blocked_by(task_id: int) -> list:
+    """Get all tasks blocked by this task.
+
+    Args:
+        task_id: Task ID
+
+    Returns:
+        List of task IDs that are blocked by this task
+    """
+    results = db.fetchall(
+        "SELECT blocks_task_id FROM task_dependencies WHERE task_id = ?",
+        (task_id,)
+    )
+    return [row['blocks_task_id'] for row in results]
+
+
+def get_tasks_blocking(task_id: int) -> list:
+    """Get all tasks that block this task.
+
+    Args:
+        task_id: Task ID
+
+    Returns:
+        List of task IDs that block this task
+    """
+    results = db.fetchall(
+        "SELECT task_id FROM task_dependencies WHERE blocks_task_id = ?",
+        (task_id,)
+    )
+    return [row['task_id'] for row in results]
+
+
+def is_task_blocked(task_id: int) -> bool:
+    """Check if a task is blocked by any other tasks.
+
+    Args:
+        task_id: Task ID
+
+    Returns:
+        True if task is blocked, False otherwise
+    """
+    result = db.fetchone(
+        "SELECT COUNT(*) as count FROM task_dependencies WHERE blocks_task_id = ?",
+        (task_id,)
+    )
+    return result['count'] > 0
+
+
+def would_create_circular_dependency(task_id: int, blocks_task_id: int) -> bool:
+    """Check if adding a dependency would create a circular dependency.
+
+    This checks if blocks_task_id (directly or transitively) blocks task_id.
+    If so, adding task_id blocks blocks_task_id would create a cycle.
+
+    Args:
+        task_id: ID of the task that would block another
+        blocks_task_id: ID of the task that would be blocked
+
+    Returns:
+        True if it would create a circular dependency, False otherwise
+    """
+    # Check if blocks_task_id already blocks task_id (directly or transitively)
+    visited = set()
+    to_check = [blocks_task_id]
+
+    while to_check:
+        current = to_check.pop()
+        if current in visited:
+            continue
+        visited.add(current)
+
+        # If current blocks task_id, we have a cycle
+        if current == task_id:
+            return True
+
+        # Get all tasks that current blocks
+        blocked_tasks = get_tasks_blocked_by(current)
+        to_check.extend(blocked_tasks)
+
+    return False
+
+
+def validate_blocking_task_ids(role_id: int, blocking_ids_str: Optional[str]) -> tuple[list[int], Optional[str]]:
+    """Validate and parse blocking task IDs.
+
+    Args:
+        role_id: Role ID (tasks must be in same role)
+        blocking_ids_str: Comma-separated task numbers (e.g., "1,3,5")
+
+    Returns:
+        Tuple of (list of valid task IDs, error message or None)
+    """
+    if not blocking_ids_str or not blocking_ids_str.strip():
+        return ([], None)
+
+    valid_task_ids = []
+    invalid_numbers = []
+
+    # Parse comma-separated numbers
+    parts = [p.strip() for p in blocking_ids_str.split(',')]
+    for part in parts:
+        if not part:
+            continue
+
+        try:
+            task_number = int(part)
+            task = get_task_by_number(role_id, task_number)
+            if task:
+                valid_task_ids.append(task['id'])
+            else:
+                invalid_numbers.append(part)
+        except ValueError:
+            invalid_numbers.append(part)
+
+    if invalid_numbers:
+        return ([], f"Invalid task numbers: {', '.join(invalid_numbers)}")
+
+    return (valid_task_ids, None)

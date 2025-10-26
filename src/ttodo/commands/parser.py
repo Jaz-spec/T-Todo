@@ -24,15 +24,31 @@ class CommandParser:
         parts = command_str.split()
         command = parts[0].lower()
 
-        # Check for task commands: t1 view, t2 edit, t3 delete, t4 doing, etc.
-        if match := re.match(r'^t(\d+)$', command):
-            task_num = int(match.group(1))
-            action = parts[1].lower() if len(parts) > 1 else None
-            return ("task", {
-                "task_number": task_num,
-                "action": action,
-                "parts": parts[2:] if len(parts) > 2 else []
-            })
+        # Check for batch task commands: t1,t3,t5 delete, t2,t4 doing, etc.
+        if match := re.match(r'^t([\d,]+)$', command):
+            task_nums_str = match.group(1)
+            # Parse comma-separated task numbers
+            try:
+                task_numbers = [int(n.strip()) for n in task_nums_str.split(',') if n.strip()]
+                action = parts[1].lower() if len(parts) > 1 else None
+
+                # If multiple task numbers, it's a batch command
+                if len(task_numbers) > 1:
+                    return ("batch_task", {
+                        "task_numbers": task_numbers,
+                        "action": action,
+                        "parts": parts[2:] if len(parts) > 2 else []
+                    })
+                else:
+                    # Single task number
+                    return ("task", {
+                        "task_number": task_numbers[0],
+                        "action": action,
+                        "parts": parts[2:] if len(parts) > 2 else []
+                    })
+            except ValueError:
+                # Invalid task number format
+                return ("invalid", {"error": "Invalid task number format"})
 
         # For now, just return basic parsing for other commands
         return (command, {"raw": command_str, "parts": parts[1:]})

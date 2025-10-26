@@ -130,12 +130,22 @@ class TodoApp(App):
         self._awaiting_role_name = False
         self._awaiting_task_title = False
         self._awaiting_task_due_date = False
+        self._awaiting_task_blocking_ids = False
         self._pending_task_title = None
+        self._pending_task_due_date = None
         self._in_task_detail_view = False  # Track if we're in detail view
+        self._was_in_kanban_before_detail = False
+        self._was_in_multi_panel_before_detail = False
+        self._saved_panel_count = None
+        self._saved_panel_roles = None
+        self.task_detail_widget = None
         self._awaiting_delete_confirmation = False
         self._pending_delete_task = None
+        self._awaiting_batch_delete_confirmation = False
+        self._pending_batch_delete_tasks = None
         self._awaiting_edit_title = False
         self._awaiting_edit_due_date = False
+        self._awaiting_edit_blocking_ids = False
         self._pending_edit_task = None
 
         # Kanban view state
@@ -194,8 +204,10 @@ class TodoApp(App):
         """Handle key presses for navigation mode and command history."""
         # Check if we're waiting for specific input - don't enter nav mode
         if (self._awaiting_role_name or self._awaiting_task_title or
-            self._awaiting_task_due_date or self._awaiting_delete_confirmation or
+            self._awaiting_task_due_date or self._awaiting_task_blocking_ids or
+            self._awaiting_delete_confirmation or self._awaiting_batch_delete_confirmation or
             self._awaiting_edit_title or self._awaiting_edit_due_date or
+            self._awaiting_edit_blocking_ids or
             self._awaiting_window_role_selection or self._in_task_detail_view or
             self._awaiting_role_remap or self._awaiting_role_delete_confirmation):
             # Allow normal text input
@@ -533,6 +545,11 @@ class TodoApp(App):
             self._handle_task_due_date_input("")
             return
 
+        if not command_str and (self._awaiting_task_blocking_ids):
+            # Allow empty input for skipping blocking IDs
+            self._handle_task_blocking_ids_input("")
+            return
+
         if not command_str and (self._awaiting_edit_title):
             # Allow empty input to keep current title
             self._handle_edit_title_input("")
@@ -541,6 +558,11 @@ class TodoApp(App):
         if not command_str and (self._awaiting_edit_due_date):
             # Allow empty input to keep current due date
             self._handle_edit_due_date_input("")
+            return
+
+        if not command_str and (self._awaiting_edit_blocking_ids):
+            # Allow empty input to keep current blocking IDs
+            self._handle_edit_blocking_ids_input("")
             return
 
         if not command_str:
@@ -559,8 +581,16 @@ class TodoApp(App):
             self._handle_task_due_date_input(command_str)
             return
 
+        if self._awaiting_task_blocking_ids:
+            self._handle_task_blocking_ids_input(command_str)
+            return
+
         if self._awaiting_delete_confirmation:
             self._handle_delete_confirmation(command_str)
+            return
+
+        if self._awaiting_batch_delete_confirmation:
+            self._handle_batch_delete_confirmation(command_str)
             return
 
         if self._awaiting_edit_title:
@@ -569,6 +599,10 @@ class TodoApp(App):
 
         if self._awaiting_edit_due_date:
             self._handle_edit_due_date_input(command_str)
+            return
+
+        if self._awaiting_edit_blocking_ids:
+            self._handle_edit_blocking_ids_input(command_str)
             return
 
         if self._awaiting_window_role_selection:
@@ -639,12 +673,22 @@ class TodoApp(App):
                     "No role selected. Use 'r1' to select a role or 'new role' to create one."
                 )
             else:
-                self.create_new_task()
+                # Check if quick add syntax is used
+                raw_command = args.get("raw", "")
+                if parts:
+                    self.quick_add_task(raw_command)
+                else:
+                    self.create_new_task()
             return
 
         # Task commands (t1 view, t2 edit, t3 delete, t4 doing, etc.)
         elif command == "task":
             self.handle_task_command(args)
+            return
+
+        # Batch task commands (t1,t3,t5 delete, t2,t4 doing, etc.)
+        elif command == "batch_task":
+            self.handle_batch_task_command(args)
             return
 
         # Undo command
@@ -1427,6 +1471,96 @@ Or press Enter to leave panel empty"""
                 "Creating new task...\n\nEnter task title in the command box below:"
             )
 
+    def quick_add_task(self, command_str: str) -> None:
+        """Parse and create task using quick add syntax.
+
+        Syntax: add "Task title" [DD MM YY] [Priority] [StoryPoints] [BlockedBy:t1,t3]
+
+        Args:
+            command_str: Full command string
+        """
+        import re
+
+        # Extract quoted title
+        title_match = re.search(r'"([^"]+)"', command_str)
+        if not title_match:
+            self.show_error("Quick add requires quoted title: add \"Task title\"")
+            return
+
+        title = title_match.group(1)
+
+        # Get the rest after the title
+        rest = command_str[title_match.end():].strip()
+        parts = rest.split() if rest else []
+
+        # Parse optional parameters
+        due_date = None
+        priority = None
+        story_points = None
+        blocking_ids_str = None
+
+        # Try to parse remaining parts
+        i = 0
+        while i < len(parts):
+            part = parts[i]
+
+            # Check for blocked by syntax: "BlockedBy:t1,t3" or "blockedby:1,3"
+            if part.lower().startswith('blockedby:'):
+                blocking_ids_str = part.split(':', 1)[1].replace('t', '')
+                i += 1
+                continue
+
+            # Check for priority (High, Medium, Low)
+            if part.capitalize() in ('High', 'Medium', 'Low'):
+                priority = part.capitalize()
+                i += 1
+                continue
+
+            # Check for story points (1, 2, 3, 5, 8, 13)
+            if part.isdigit() and int(part) in (1, 2, 3, 5, 8, 13):
+                story_points = int(part)
+                i += 1
+                continue
+
+            # Check for date (DD MM YY - need 3 consecutive numeric parts)
+            if i + 2 < len(parts) and parts[i].isdigit() and parts[i+1].isdigit() and parts[i+2].isdigit():
+                due_date = f"{parts[i]} {parts[i+1]} {parts[i+2]}"
+                i += 3
+                continue
+
+            # Unknown part - skip it
+            i += 1
+
+        # Validate blocking task IDs if provided
+        blocking_task_ids = []
+        if blocking_ids_str:
+            valid_ids, error = task_commands.validate_blocking_task_ids(
+                self.active_role_id, blocking_ids_str
+            )
+            if error:
+                self.show_error(error)
+                return
+            blocking_task_ids = valid_ids
+
+        # Create task
+        task_id = task_commands.create_task(
+            role_id=self.active_role_id,
+            title=title,
+            due_date=due_date,
+            priority=priority,
+            story_points=story_points
+        )
+
+        if task_id:
+            # Add dependencies
+            for blocking_id in blocking_task_ids:
+                task_commands.add_task_dependency(blocking_id, task_id)
+
+            # Refresh the panel
+            self.refresh_panel_for_role(self.active_role_id)
+        else:
+            self.show_error("Failed to create task")
+
     def _handle_task_title_input(self, title: str) -> None:
         """Handle task title input.
 
@@ -1459,16 +1593,47 @@ Or press Enter to leave panel empty"""
             due_date_str: Due date string
         """
         self._awaiting_task_due_date = False
+        self._pending_task_due_date = due_date_str if due_date_str.strip() else None
+
+        # Now prompt for blocking task IDs
+        self._awaiting_task_blocking_ids = True
+        self.command_input.placeholder = "Blocked by task IDs (e.g., '1,3,5' or Enter to skip)..."
+
+    def _handle_task_blocking_ids_input(self, blocking_ids_str: str) -> None:
+        """Handle task blocking IDs input.
+
+        Args:
+            blocking_ids_str: Comma-separated task numbers
+        """
+        self._awaiting_task_blocking_ids = False
         self.command_input.placeholder = "Type a command... (type 'help' for commands)"
+
+        # Validate blocking task IDs if provided
+        blocking_task_ids = []
+        if blocking_ids_str.strip():
+            valid_ids, error = task_commands.validate_blocking_task_ids(
+                self.active_role_id, blocking_ids_str
+            )
+            if error:
+                self.show_error(error)
+                # Clean up
+                self._pending_task_title = None
+                self._pending_task_due_date = None
+                return
+            blocking_task_ids = valid_ids
 
         # Create task
         task_id = task_commands.create_task(
             role_id=self.active_role_id,
             title=self._pending_task_title,
-            due_date=due_date_str if due_date_str.strip() else None,
+            due_date=self._pending_task_due_date,
         )
 
         if task_id:
+            # Add dependencies
+            for blocking_id in blocking_task_ids:
+                task_commands.add_task_dependency(blocking_id, task_id)
+
             # Refresh the panel for the role we just added a task to
             self.refresh_panel_for_role(self.active_role_id)
         else:
@@ -1476,6 +1641,7 @@ Or press Enter to leave panel empty"""
 
         # Clean up
         self._pending_task_title = None
+        self._pending_task_due_date = None
 
     def show_error(self, message: str) -> None:
         """Show an error message.
@@ -1562,6 +1728,83 @@ Or press Enter to leave panel empty"""
         else:
             self.show_error(f"Unknown action: {action}")
 
+    def handle_batch_task_command(self, args: dict) -> None:
+        """Handle batch task commands.
+
+        Args:
+            args: Parsed command arguments containing task_numbers and action
+        """
+        if not self.active_role_id:
+            self.show_error("No role selected. Select a role first.")
+            return
+
+        task_numbers = args.get("task_numbers", [])
+        action = args.get("action")
+
+        if not action:
+            task_list = ", ".join(f"t{n}" for n in task_numbers)
+            self.show_error(f"No action specified for tasks {task_list}")
+            return
+
+        # Batch commands only support: delete, doing, done, todo
+        if action not in ("delete", "doing", "done", "todo"):
+            self.show_error(f"Batch operation not supported for action: {action}")
+            return
+
+        # Get all tasks and validate they exist
+        tasks = []
+        invalid_numbers = []
+        for task_num in task_numbers:
+            task = task_commands.get_task_by_number(self.active_role_id, task_num)
+            if task:
+                tasks.append(task)
+            else:
+                invalid_numbers.append(task_num)
+
+        if invalid_numbers:
+            invalid_str = ", ".join(f"t{n}" for n in invalid_numbers)
+            self.show_error(f"Tasks not found: {invalid_str}")
+            return
+
+        if not tasks:
+            self.show_error("No valid tasks found")
+            return
+
+        # Handle different batch actions
+        if action == "delete":
+            self.batch_delete_tasks(tasks)
+        elif action in ("doing", "done", "todo"):
+            self.batch_update_status(tasks, action)
+
+    def batch_delete_tasks(self, tasks: list) -> None:
+        """Delete multiple tasks with confirmation.
+
+        Args:
+            tasks: List of task database rows
+        """
+        self._pending_batch_delete_tasks = tasks
+        self._awaiting_batch_delete_confirmation = True
+
+        # Show confirmation prompt
+        task_count = len(tasks)
+        task_list = ", ".join(f"t{t['task_number']}" for t in tasks)
+        self.command_input.placeholder = f"Delete {task_count} tasks ({task_list})? Type 'yes' or 'no'"
+
+    def batch_update_status(self, tasks: list, status: str) -> None:
+        """Update status for multiple tasks.
+
+        Args:
+            tasks: List of task database rows
+            status: New status (doing/done/todo)
+        """
+        # Update all tasks
+        for task in tasks:
+            task_commands.update_task_status(task['id'], status)
+
+        # Refresh the panel
+        if tasks:
+            self.refresh_panel_for_role(tasks[0]['role_id'])
+
     def view_task(self, task) -> None:
         """View task details.
 
@@ -1574,24 +1817,107 @@ Or press Enter to leave panel empty"""
             self.show_error("Role not found")
             return
 
+        # Store current view state so we can return to it
+        self._was_in_kanban_before_detail = self._in_kanban_view
+        self._was_in_multi_panel_before_detail = self.in_multi_panel_mode
+
+        # Save multi-panel layout info if in multi-panel mode
+        if self.in_multi_panel_mode and self.multi_panel_grid:
+            self._saved_panel_count = self.multi_panel_grid.panel_count
+            self._saved_panel_roles = self.multi_panel_grid.panel_roles.copy()
+        else:
+            self._saved_panel_count = None
+            self._saved_panel_roles = None
+
         # Render task detail view
         detail_panel = render_task_detail(task, role['name'], role['color'])
-        self.main_content.update(detail_panel)
+
+        # If in multi-panel mode, remove the grid and show detail
+        if self.in_multi_panel_mode:
+            if self.multi_panel_grid:
+                self.multi_panel_grid.remove()
+                self.multi_panel_grid = None
+                self.in_multi_panel_mode = False
+            # Create a new Static widget for the detail view
+            from textual.widgets import Static
+            self.task_detail_widget = Static(detail_panel)
+            self.main_content = self.task_detail_widget
+            self.mount(self.task_detail_widget, before=0)
+
+        # If in kanban mode, remove kanban and show detail
+        elif self._in_kanban_view:
+            # Remove the current kanban board panel
+            if self.current_panel:
+                self.current_panel.remove()
+            # Clear kanban state
+            self._in_kanban_view = False
+            self.current_panel = None
+            # Create a new Static widget for the detail view
+            from textual.widgets import Static
+            self.task_detail_widget = Static(detail_panel)
+            self.main_content = self.task_detail_widget
+            self.mount(self.task_detail_widget, before=0)
+
+        # If in single panel mode, just update the main_content
+        else:
+            self.main_content.update(detail_panel)
 
         # Set state flag
         self._in_task_detail_view = True
-        self.command_input.placeholder = "Press Enter to return to role view..."
+        self.command_input.placeholder = "Press Enter to return..."
 
     def _exit_task_detail_view(self) -> None:
-        """Exit task detail view and return to role panel."""
+        """Exit task detail view and return to previous view."""
         self._in_task_detail_view = False
         self.command_input.placeholder = "Type a command... (type 'help' for commands)"
 
-        # Refresh the current panel
-        if self.active_role_id:
-            role = role_commands.get_role_by_id(self.active_role_id)
-            if role:
-                self.display_role_panel(role)
+        # Remove the task detail widget if it exists
+        if hasattr(self, 'task_detail_widget') and self.task_detail_widget:
+            self.task_detail_widget.remove()
+            self.task_detail_widget = None
+
+        # Restore previous view
+        if self._was_in_multi_panel_before_detail:
+            # Recreate and mount the multi-panel grid
+            if self._saved_panel_count and self._saved_panel_roles:
+                self._create_multi_panel_layout(self._saved_panel_count, self._saved_panel_roles)
+        elif self._was_in_kanban_before_detail:
+            # Recreate and mount the kanban board
+            if self.active_role_id:
+                role = role_commands.get_role_by_id(self.active_role_id)
+                if role:
+                    # Create new MainContent widget
+                    new_content = MainContent()
+                    self.main_content = new_content
+                    self.mount(new_content, before=0)
+
+                    # Create and mount kanban board
+                    from ttodo.ui.kanban import KanbanBoard
+                    kanban_board = KanbanBoard(
+                        role_id=role['id'],
+                        role_name=role['name'],
+                        display_number=role['display_number'],
+                        color=role['color']
+                    )
+
+                    # Update state
+                    self._in_kanban_view = True
+                    self.current_panel = kanban_board
+
+                    # Mount kanban board
+                    self.main_content.mount(kanban_board)
+        else:
+            # Restore single role panel
+            if self.active_role_id:
+                role = role_commands.get_role_by_id(self.active_role_id)
+                if role:
+                    self.display_role_panel(role)
+
+        # Clear state flags
+        self._was_in_kanban_before_detail = False
+        self._was_in_multi_panel_before_detail = False
+        self._saved_panel_count = None
+        self._saved_panel_roles = None
 
     def update_task_status(self, task, status: str) -> None:
         """Update task status.
@@ -1645,6 +1971,34 @@ Or press Enter to leave panel empty"""
 
         # Clean up
         self._pending_delete_task = None
+
+    def _handle_batch_delete_confirmation(self, response: str) -> None:
+        """Handle batch delete confirmation response.
+
+        Args:
+            response: User's response (yes/no)
+        """
+        self._awaiting_batch_delete_confirmation = False
+        self.command_input.placeholder = "Type a command... (type 'help' for commands)"
+
+        response = response.strip().lower()
+
+        if response == 'yes':
+            # Delete all tasks
+            tasks = self._pending_batch_delete_tasks
+            for task in tasks:
+                task_commands.delete_task(task['id'], save_to_undo=True)
+
+            # Refresh the panel
+            if tasks:
+                self.refresh_panel_for_role(tasks[0]['role_id'])
+        else:
+            # Cancelled - just refresh to show tasks still there
+            if self._pending_batch_delete_tasks:
+                self.refresh_panel_for_role(self._pending_batch_delete_tasks[0]['role_id'])
+
+        # Clean up
+        self._pending_batch_delete_tasks = None
 
     def undo_last_deletion(self) -> None:
         """Undo the last deleted task or role."""
@@ -1732,18 +2086,46 @@ Or press Enter to leave panel empty"""
             due_date_str: New due date string (empty to keep current, 'clear' to remove)
         """
         self._awaiting_edit_due_date = False
+
+        task = self._pending_edit_task
+
+        # Store the new due date temporarily
+        if due_date_str.strip().lower() == 'clear':
+            self._pending_task_due_date = ""  # Clear the due date
+        elif due_date_str.strip():
+            self._pending_task_due_date = due_date_str.strip()
+        else:
+            self._pending_task_due_date = task['due_date']  # Keep current
+
+        # Get current blocking task IDs
+        blocking_ids = task_commands.get_tasks_blocking(task['id'])
+        blocking_numbers = []
+        for blocking_id in blocking_ids:
+            # Get the task by ID (not task_number)
+            blocking_task = task_commands.db.fetchone(
+                "SELECT task_number FROM tasks WHERE id = ?", (blocking_id,)
+            )
+            if blocking_task:
+                blocking_numbers.append(str(blocking_task['task_number']))
+
+        current_blocking = ','.join(blocking_numbers) if blocking_numbers else "none"
+
+        # Move to blocking IDs prompt
+        self.command_input.placeholder = f"Edit blocked by (current: {current_blocking}) - Enter to skip or 'clear' to remove all..."
+        self._awaiting_edit_blocking_ids = True
+
+    def _handle_edit_blocking_ids_input(self, blocking_ids_str: str) -> None:
+        """Handle edit blocking IDs input.
+
+        Args:
+            blocking_ids_str: Comma-separated task numbers (empty to keep current, 'clear' to remove all)
+        """
+        self._awaiting_edit_blocking_ids = False
         self.command_input.placeholder = "Type a command... (type 'help' for commands)"
 
         task = self._pending_edit_task
         new_title = self._pending_task_title if self._pending_task_title else task['title']
-
-        # Determine new due date
-        new_due_date = task['due_date']  # Default to current
-        if due_date_str.strip().lower() == 'clear':
-            new_due_date = ""  # Clear the due date
-        elif due_date_str.strip():
-            new_due_date = due_date_str.strip()
-        # else: keep current (new_due_date already set)
+        new_due_date = self._pending_task_due_date
 
         # Update the task
         success = task_commands.update_task(
@@ -1752,15 +2134,43 @@ Or press Enter to leave panel empty"""
             due_date=new_due_date
         )
 
-        if success:
-            # Refresh the panel for this task's role
-            self.refresh_panel_for_role(task['role_id'])
-        else:
+        if not success:
             self.show_error("Failed to update task")
+            self._pending_edit_task = None
+            self._pending_task_title = None
+            self._pending_task_due_date = None
+            return
+
+        # Update dependencies
+        if blocking_ids_str.strip().lower() == 'clear':
+            # Remove all blocking dependencies
+            current_blocking_ids = task_commands.get_tasks_blocking(task['id'])
+            for blocking_id in current_blocking_ids:
+                task_commands.remove_task_dependency(blocking_id, task['id'])
+        elif blocking_ids_str.strip():
+            # Validate and update blocking task IDs
+            valid_ids, error = task_commands.validate_blocking_task_ids(
+                task['role_id'], blocking_ids_str
+            )
+            if error:
+                self.show_error(error)
+            else:
+                # Remove all existing dependencies
+                current_blocking_ids = task_commands.get_tasks_blocking(task['id'])
+                for blocking_id in current_blocking_ids:
+                    task_commands.remove_task_dependency(blocking_id, task['id'])
+
+                # Add new dependencies
+                for blocking_id in valid_ids:
+                    task_commands.add_task_dependency(blocking_id, task['id'])
+
+        # Refresh the panel for this task's role
+        self.refresh_panel_for_role(task['role_id'])
 
         # Clean up
         self._pending_edit_task = None
         self._pending_task_title = None
+        self._pending_task_due_date = None
 
     def action_clear_input(self) -> None:
         """Clear the command input."""

@@ -4,6 +4,7 @@ from rich.text import Text
 from rich.console import Group
 from rich.markdown import Markdown
 from ttodo.utils.date_utils import format_relative_date
+from ttodo.commands import task_commands
 
 
 def render_task_detail(task, role_name: str, role_color: str) -> Panel:
@@ -63,6 +64,43 @@ def render_task_detail(task, role_name: str, role_color: str) -> Panel:
     status_display = status_map.get(task['status'], task['status'])
     status_text.append(status_display, style=role_color)
     lines.append(status_text)
+
+    # Dependencies
+    lines.append("")
+
+    # Tasks this task blocks
+    blocks_task_ids = task_commands.get_tasks_blocked_by(task['id'])
+    if blocks_task_ids:
+        blocks_numbers = []
+        for blocked_id in blocks_task_ids:
+            blocked_task = task_commands.db.fetchone(
+                "SELECT task_number FROM tasks WHERE id = ?", (blocked_id,)
+            )
+            if blocked_task:
+                blocks_numbers.append(f"t{blocked_task['task_number']}")
+
+        if blocks_numbers:
+            blocks_text = Text()
+            blocks_text.append("Blocks: ", style="bold")
+            blocks_text.append(", ".join(blocks_numbers), style=role_color)
+            lines.append(blocks_text)
+
+    # Tasks that block this task
+    blocked_by_ids = task_commands.get_tasks_blocking(task['id'])
+    if blocked_by_ids:
+        blocked_by_numbers = []
+        for blocking_id in blocked_by_ids:
+            blocking_task = task_commands.db.fetchone(
+                "SELECT task_number FROM tasks WHERE id = ?", (blocking_id,)
+            )
+            if blocking_task:
+                blocked_by_numbers.append(f"t{blocking_task['task_number']}")
+
+        if blocked_by_numbers:
+            blocked_by_text = Text()
+            blocked_by_text.append("Blocked by: ", style="bold")
+            blocked_by_text.append(", ".join(blocked_by_numbers), style=role_color)
+            lines.append(blocked_by_text)
 
     # Description
     if task['description']:

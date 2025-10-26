@@ -3,9 +3,9 @@ from textual.widgets import Static
 from rich.text import Text
 from rich.panel import Panel as RichPanel
 from rich.console import Group
-from ttodo.commands.task_commands import get_tasks_for_role
+from ttodo.commands.task_commands import get_tasks_for_role, is_task_blocked
 from ttodo.utils.date_utils import format_relative_date
-from ttodo.utils.colors import get_active_color
+from ttodo.utils.colors import get_active_color, get_blocked_color
 
 
 class RolePanel(Static):
@@ -96,13 +96,17 @@ class RolePanel(Static):
         title = task['title']
         due_date = task['due_date']
 
+        # Check if task is blocked
+        is_blocked = is_task_blocked(task['id'])
+        task_color = get_blocked_color(self.base_color) if is_blocked else self.base_color
+
         line = Text()
-        line.append(f"t{task_num}: ", style=f"bold {self.base_color}")
-        line.append(title, style=self.base_color)
+        line.append(f"t{task_num}: ", style=f"bold {task_color}")
+        line.append(title, style=task_color)
 
         if due_date:
             relative_date = format_relative_date(due_date)
-            line.append(f" - {relative_date}", style=f"dim {self.base_color}")
+            line.append(f" - {relative_date}", style=f"dim {task_color}")
 
         return line
 
