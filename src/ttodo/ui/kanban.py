@@ -4,7 +4,13 @@ from textual.containers import Horizontal
 from rich.text import Text
 from rich.panel import Panel as RichPanel
 from rich.console import Group
-from ttodo.commands.task_commands import get_tasks_for_role, is_task_blocked
+from ttodo.commands.task_commands import (
+    get_tasks_for_role,
+    is_task_blocked,
+    get_tasks_blocking,
+    get_tasks_blocked_by
+)
+from ttodo.database.models import db
 from ttodo.utils.date_utils import format_relative_date
 from ttodo.utils.colors import get_active_color, get_blocked_color
 
@@ -76,6 +82,50 @@ class KanbanColumn(Static):
                     sp_line.append("  SP: ", style=f"dim {task_color}")
                     sp_line.append(str(task['story_points']), style=task_color)
                     lines.append(sp_line)
+
+                # Dependencies
+                blocking_ids = get_tasks_blocking(task['id'])
+                blocked_by_ids = get_tasks_blocked_by(task['id'])
+
+                if blocking_ids:
+                    blocking_numbers = []
+                    for blocking_id in blocking_ids:
+                        blocking_task = db.fetchone(
+                            "SELECT task_number FROM tasks WHERE id = ?", (blocking_id,)
+                        )
+                        if blocking_task:
+                            blocking_numbers.append(f"t{blocking_task['task_number']}")
+                    if blocking_numbers:
+                        blocked_by_line = Text()
+                        blocked_by_line.append("  Blocked by: ", style=f"dim {task_color}")
+                        blocked_by_line.append(", ".join(blocking_numbers), style=task_color)
+                        lines.append(blocked_by_line)
+
+                if blocked_by_ids:
+                    blocked_numbers = []
+                    for blocked_id in blocked_by_ids:
+                        blocked_task = db.fetchone(
+                            "SELECT task_number FROM tasks WHERE id = ?", (blocked_id,)
+                        )
+                        if blocked_task:
+                            blocked_numbers.append(f"t{blocked_task['task_number']}")
+                    if blocked_numbers:
+                        blocks_line = Text()
+                        blocks_line.append("  Blocks: ", style=f"dim {task_color}")
+                        blocks_line.append(", ".join(blocked_numbers), style=task_color)
+                        lines.append(blocks_line)
+
+                # Description (if exists)
+                description = task['description']
+                if description:
+                    desc_line = Text()
+                    desc_line.append("  Desc: ", style=f"dim {task_color}")
+                    # Truncate long descriptions
+                    if len(description) > 80:
+                        desc_line.append(description[:80] + "...", style=task_color)
+                    else:
+                        desc_line.append(description, style=task_color)
+                    lines.append(desc_line)
 
                 # Add spacing between cards
                 if i < len(tasks) - 1:

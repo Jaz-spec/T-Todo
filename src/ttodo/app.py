@@ -9,7 +9,6 @@ from ttodo.commands import role_commands, task_commands, window_commands
 from ttodo.database.models import db
 from ttodo.database.migrations import initialize_database
 from ttodo.ui.panels import RolePanel
-from ttodo.ui.task_detail import render_task_detail
 from ttodo.ui.multi_panel_grid import MultiPanelGrid
 from ttodo.ui.kanban import KanbanBoard
 from ttodo.utils.colors import ROLE_COLORS, get_role_color, get_active_color
@@ -130,21 +129,24 @@ class TodoApp(App):
         self._awaiting_role_name = False
         self._awaiting_task_title = False
         self._awaiting_task_due_date = False
+        self._awaiting_task_priority = False
+        self._awaiting_task_story_points = False
+        self._awaiting_task_description = False
         self._awaiting_task_blocking_ids = False
         self._pending_task_title = None
         self._pending_task_due_date = None
-        self._in_task_detail_view = False  # Track if we're in detail view
-        self._was_in_kanban_before_detail = False
-        self._was_in_multi_panel_before_detail = False
-        self._saved_panel_count = None
-        self._saved_panel_roles = None
-        self.task_detail_widget = None
+        self._pending_task_priority = None
+        self._pending_task_story_points = None
+        self._pending_task_description = None
         self._awaiting_delete_confirmation = False
         self._pending_delete_task = None
         self._awaiting_batch_delete_confirmation = False
         self._pending_batch_delete_tasks = None
         self._awaiting_edit_title = False
         self._awaiting_edit_due_date = False
+        self._awaiting_edit_priority = False
+        self._awaiting_edit_story_points = False
+        self._awaiting_edit_description = False
         self._awaiting_edit_blocking_ids = False
         self._pending_edit_task = None
 
@@ -204,11 +206,14 @@ class TodoApp(App):
         """Handle key presses for navigation mode and command history."""
         # Check if we're waiting for specific input - don't enter nav mode
         if (self._awaiting_role_name or self._awaiting_task_title or
-            self._awaiting_task_due_date or self._awaiting_task_blocking_ids or
+            self._awaiting_task_due_date or self._awaiting_task_priority or
+            self._awaiting_task_story_points or self._awaiting_task_description or
+            self._awaiting_task_blocking_ids or
             self._awaiting_delete_confirmation or self._awaiting_batch_delete_confirmation or
             self._awaiting_edit_title or self._awaiting_edit_due_date or
-            self._awaiting_edit_blocking_ids or
-            self._awaiting_window_role_selection or self._in_task_detail_view or
+            self._awaiting_edit_priority or self._awaiting_edit_story_points or
+            self._awaiting_edit_description or self._awaiting_edit_blocking_ids or
+            self._awaiting_window_role_selection or
             self._awaiting_role_remap or self._awaiting_role_delete_confirmation):
             # Allow normal text input
             return
@@ -535,14 +540,24 @@ class TodoApp(App):
         # Clear input first
         self.command_input.value = ""
 
-        # If in task detail view, any key press returns to panel
-        if self._in_task_detail_view:
-            self._exit_task_detail_view()
-            return
-
         if not command_str and (self._awaiting_task_due_date):
             # Allow empty input for skipping due date
             self._handle_task_due_date_input("")
+            return
+
+        if not command_str and (self._awaiting_task_priority):
+            # Allow empty input for skipping priority
+            self._handle_task_priority_input("")
+            return
+
+        if not command_str and (self._awaiting_task_story_points):
+            # Allow empty input for skipping story points
+            self._handle_task_story_points_input("")
+            return
+
+        if not command_str and (self._awaiting_task_description):
+            # Allow empty input for skipping description
+            self._handle_task_description_input("")
             return
 
         if not command_str and (self._awaiting_task_blocking_ids):
@@ -558,6 +573,21 @@ class TodoApp(App):
         if not command_str and (self._awaiting_edit_due_date):
             # Allow empty input to keep current due date
             self._handle_edit_due_date_input("")
+            return
+
+        if not command_str and (self._awaiting_edit_priority):
+            # Allow empty input to keep current priority
+            self._handle_edit_priority_input("")
+            return
+
+        if not command_str and (self._awaiting_edit_story_points):
+            # Allow empty input to keep current story points
+            self._handle_edit_story_points_input("")
+            return
+
+        if not command_str and (self._awaiting_edit_description):
+            # Allow empty input to keep current description
+            self._handle_edit_description_input("")
             return
 
         if not command_str and (self._awaiting_edit_blocking_ids):
@@ -581,6 +611,18 @@ class TodoApp(App):
             self._handle_task_due_date_input(command_str)
             return
 
+        if self._awaiting_task_priority:
+            self._handle_task_priority_input(command_str)
+            return
+
+        if self._awaiting_task_story_points:
+            self._handle_task_story_points_input(command_str)
+            return
+
+        if self._awaiting_task_description:
+            self._handle_task_description_input(command_str)
+            return
+
         if self._awaiting_task_blocking_ids:
             self._handle_task_blocking_ids_input(command_str)
             return
@@ -599,6 +641,18 @@ class TodoApp(App):
 
         if self._awaiting_edit_due_date:
             self._handle_edit_due_date_input(command_str)
+            return
+
+        if self._awaiting_edit_priority:
+            self._handle_edit_priority_input(command_str)
+            return
+
+        if self._awaiting_edit_story_points:
+            self._handle_edit_story_points_input(command_str)
+            return
+
+        if self._awaiting_edit_description:
+            self._handle_edit_description_input(command_str)
             return
 
         if self._awaiting_edit_blocking_ids:
@@ -764,7 +818,6 @@ Role Management:
 
 Task Management:
   add                  Add a task to the active role (interactive prompts)
-  t[number] view       View full task details (e.g., t1 view)
   t[number] edit       Edit a task (e.g., t2 edit)
   t[number] delete     Delete a task (e.g., t3 delete)
   t[number] doing      Mark task as in progress (e.g., t4 doing)
@@ -1595,6 +1648,84 @@ Or press Enter to leave panel empty"""
         self._awaiting_task_due_date = False
         self._pending_task_due_date = due_date_str if due_date_str.strip() else None
 
+        # Now prompt for priority
+        self._awaiting_task_priority = True
+        self.command_input.placeholder = "Priority (High/Medium/Low or Enter to skip)..."
+
+    def _handle_task_priority_input(self, priority_str: str) -> None:
+        """Handle task priority input.
+
+        Args:
+            priority_str: Priority string (High/Medium/Low)
+        """
+        self._awaiting_task_priority = False
+
+        # Validate priority if provided
+        if priority_str.strip():
+            priority_capitalized = priority_str.strip().capitalize()
+            if priority_capitalized not in ('High', 'Medium', 'Low'):
+                self.show_error("Invalid priority. Must be High, Medium, or Low.")
+                # Clean up and restart
+                self._pending_task_title = None
+                self._pending_task_due_date = None
+                self._pending_task_priority = None
+                self.command_input.placeholder = "Type a command... (type 'help' for commands)"
+                return
+            self._pending_task_priority = priority_capitalized
+        else:
+            self._pending_task_priority = None
+
+        # Now prompt for story points
+        self._awaiting_task_story_points = True
+        self.command_input.placeholder = "Story points (1/2/3/5/8/13 or Enter to skip)..."
+
+    def _handle_task_story_points_input(self, story_points_str: str) -> None:
+        """Handle task story points input.
+
+        Args:
+            story_points_str: Story points string
+        """
+        self._awaiting_task_story_points = False
+
+        # Validate story points if provided
+        if story_points_str.strip():
+            try:
+                sp = int(story_points_str.strip())
+                if sp not in (1, 2, 3, 5, 8, 13):
+                    self.show_error("Invalid story points. Must be 1, 2, 3, 5, 8, or 13.")
+                    # Clean up and restart
+                    self._pending_task_title = None
+                    self._pending_task_due_date = None
+                    self._pending_task_priority = None
+                    self._pending_task_story_points = None
+                    self.command_input.placeholder = "Type a command... (type 'help' for commands)"
+                    return
+                self._pending_task_story_points = sp
+            except ValueError:
+                self.show_error("Invalid story points. Must be a number: 1, 2, 3, 5, 8, or 13.")
+                # Clean up and restart
+                self._pending_task_title = None
+                self._pending_task_due_date = None
+                self._pending_task_priority = None
+                self._pending_task_story_points = None
+                self.command_input.placeholder = "Type a command... (type 'help' for commands)"
+                return
+        else:
+            self._pending_task_story_points = None
+
+        # Now prompt for description
+        self._awaiting_task_description = True
+        self.command_input.placeholder = "Description (or Enter to skip)..."
+
+    def _handle_task_description_input(self, description_str: str) -> None:
+        """Handle task description input.
+
+        Args:
+            description_str: Description string
+        """
+        self._awaiting_task_description = False
+        self._pending_task_description = description_str if description_str.strip() else None
+
         # Now prompt for blocking task IDs
         self._awaiting_task_blocking_ids = True
         self.command_input.placeholder = "Blocked by task IDs (e.g., '1,3,5' or Enter to skip)..."
@@ -1619,6 +1750,9 @@ Or press Enter to leave panel empty"""
                 # Clean up
                 self._pending_task_title = None
                 self._pending_task_due_date = None
+                self._pending_task_priority = None
+                self._pending_task_story_points = None
+                self._pending_task_description = None
                 return
             blocking_task_ids = valid_ids
 
@@ -1627,6 +1761,9 @@ Or press Enter to leave panel empty"""
             role_id=self.active_role_id,
             title=self._pending_task_title,
             due_date=self._pending_task_due_date,
+            priority=self._pending_task_priority,
+            story_points=self._pending_task_story_points,
+            description=self._pending_task_description,
         )
 
         if task_id:
@@ -1642,6 +1779,9 @@ Or press Enter to leave panel empty"""
         # Clean up
         self._pending_task_title = None
         self._pending_task_due_date = None
+        self._pending_task_priority = None
+        self._pending_task_story_points = None
+        self._pending_task_description = None
 
     def show_error(self, message: str) -> None:
         """Show an error message.
@@ -1707,7 +1847,7 @@ Or press Enter to leave panel empty"""
         action = args.get("action")
 
         if not action:
-            self.show_error(f"No action specified for task t{task_number}. Try 't{task_number} view'")
+            self.show_error(f"No action specified for task t{task_number}. Try 't{task_number} edit' or 't{task_number} delete'")
             return
 
         # Get the task
@@ -1717,9 +1857,7 @@ Or press Enter to leave panel empty"""
             return
 
         # Handle different actions
-        if action == "view":
-            self.view_task(task)
-        elif action in ("doing", "done", "todo"):
+        if action in ("doing", "done", "todo"):
             self.update_task_status(task, action)
         elif action == "delete":
             self.delete_task(task)
@@ -1804,120 +1942,6 @@ Or press Enter to leave panel empty"""
         # Refresh the panel
         if tasks:
             self.refresh_panel_for_role(tasks[0]['role_id'])
-
-    def view_task(self, task) -> None:
-        """View task details.
-
-        Args:
-            task: Task database row
-        """
-        # Get role info for display
-        role = role_commands.get_role_by_id(self.active_role_id)
-        if not role:
-            self.show_error("Role not found")
-            return
-
-        # Store current view state so we can return to it
-        self._was_in_kanban_before_detail = self._in_kanban_view
-        self._was_in_multi_panel_before_detail = self.in_multi_panel_mode
-
-        # Save multi-panel layout info if in multi-panel mode
-        if self.in_multi_panel_mode and self.multi_panel_grid:
-            self._saved_panel_count = self.multi_panel_grid.panel_count
-            self._saved_panel_roles = self.multi_panel_grid.panel_roles.copy()
-        else:
-            self._saved_panel_count = None
-            self._saved_panel_roles = None
-
-        # Render task detail view
-        detail_panel = render_task_detail(task, role['name'], role['color'])
-
-        # If in multi-panel mode, remove the grid and show detail
-        if self.in_multi_panel_mode:
-            if self.multi_panel_grid:
-                self.multi_panel_grid.remove()
-                self.multi_panel_grid = None
-                self.in_multi_panel_mode = False
-            # Create a new Static widget for the detail view
-            from textual.widgets import Static
-            self.task_detail_widget = Static(detail_panel)
-            self.main_content = self.task_detail_widget
-            self.mount(self.task_detail_widget, before=0)
-
-        # If in kanban mode, remove kanban and show detail
-        elif self._in_kanban_view:
-            # Remove the current kanban board panel
-            if self.current_panel:
-                self.current_panel.remove()
-            # Clear kanban state
-            self._in_kanban_view = False
-            self.current_panel = None
-            # Create a new Static widget for the detail view
-            from textual.widgets import Static
-            self.task_detail_widget = Static(detail_panel)
-            self.main_content = self.task_detail_widget
-            self.mount(self.task_detail_widget, before=0)
-
-        # If in single panel mode, just update the main_content
-        else:
-            self.main_content.update(detail_panel)
-
-        # Set state flag
-        self._in_task_detail_view = True
-        self.command_input.placeholder = "Press Enter to return..."
-
-    def _exit_task_detail_view(self) -> None:
-        """Exit task detail view and return to previous view."""
-        self._in_task_detail_view = False
-        self.command_input.placeholder = "Type a command... (type 'help' for commands)"
-
-        # Remove the task detail widget if it exists
-        if hasattr(self, 'task_detail_widget') and self.task_detail_widget:
-            self.task_detail_widget.remove()
-            self.task_detail_widget = None
-
-        # Restore previous view
-        if self._was_in_multi_panel_before_detail:
-            # Recreate and mount the multi-panel grid
-            if self._saved_panel_count and self._saved_panel_roles:
-                self._create_multi_panel_layout(self._saved_panel_count, self._saved_panel_roles)
-        elif self._was_in_kanban_before_detail:
-            # Recreate and mount the kanban board
-            if self.active_role_id:
-                role = role_commands.get_role_by_id(self.active_role_id)
-                if role:
-                    # Create new MainContent widget
-                    new_content = MainContent()
-                    self.main_content = new_content
-                    self.mount(new_content, before=0)
-
-                    # Create and mount kanban board
-                    from ttodo.ui.kanban import KanbanBoard
-                    kanban_board = KanbanBoard(
-                        role_id=role['id'],
-                        role_name=role['name'],
-                        display_number=role['display_number'],
-                        color=role['color']
-                    )
-
-                    # Update state
-                    self._in_kanban_view = True
-                    self.current_panel = kanban_board
-
-                    # Mount kanban board
-                    self.main_content.mount(kanban_board)
-        else:
-            # Restore single role panel
-            if self.active_role_id:
-                role = role_commands.get_role_by_id(self.active_role_id)
-                if role:
-                    self.display_role_panel(role)
-
-        # Clear state flags
-        self._was_in_kanban_before_detail = False
-        self._was_in_multi_panel_before_detail = False
-        self._saved_panel_count = None
-        self._saved_panel_roles = None
 
     def update_task_status(self, task, status: str) -> None:
         """Update task status.
@@ -2097,6 +2121,110 @@ Or press Enter to leave panel empty"""
         else:
             self._pending_task_due_date = task['due_date']  # Keep current
 
+        # Move to priority prompt
+        current_priority = task['priority'] if task['priority'] else "none"
+        self.command_input.placeholder = f"Edit priority (current: {current_priority}) - High/Medium/Low/'clear'/Enter to skip..."
+        self._awaiting_edit_priority = True
+
+    def _handle_edit_priority_input(self, priority_str: str) -> None:
+        """Handle edit priority input.
+
+        Args:
+            priority_str: New priority string (empty to keep current, 'clear' to remove)
+        """
+        self._awaiting_edit_priority = False
+
+        task = self._pending_edit_task
+
+        # Store the new priority temporarily
+        if priority_str.strip().lower() == 'clear':
+            self._pending_task_priority = ""  # Clear the priority
+        elif priority_str.strip():
+            priority_capitalized = priority_str.strip().capitalize()
+            if priority_capitalized not in ('High', 'Medium', 'Low'):
+                self.show_error("Invalid priority. Must be High, Medium, or Low.")
+                # Clean up and restart
+                self._pending_edit_task = None
+                self._pending_task_title = None
+                self._pending_task_due_date = None
+                self._pending_task_priority = None
+                self.command_input.placeholder = "Type a command... (type 'help' for commands)"
+                return
+            self._pending_task_priority = priority_capitalized
+        else:
+            self._pending_task_priority = task['priority']  # Keep current
+
+        # Move to story points prompt
+        current_sp = task['story_points'] if task['story_points'] else "none"
+        self.command_input.placeholder = f"Edit story points (current: {current_sp}) - 1/2/3/5/8/13/'clear'/Enter to skip..."
+        self._awaiting_edit_story_points = True
+
+    def _handle_edit_story_points_input(self, story_points_str: str) -> None:
+        """Handle edit story points input.
+
+        Args:
+            story_points_str: New story points string (empty to keep current, 'clear' to remove)
+        """
+        self._awaiting_edit_story_points = False
+
+        task = self._pending_edit_task
+
+        # Store the new story points temporarily
+        if story_points_str.strip().lower() == 'clear':
+            self._pending_task_story_points = 0  # Clear (use 0 as sentinel for None)
+        elif story_points_str.strip():
+            try:
+                sp = int(story_points_str.strip())
+                if sp not in (1, 2, 3, 5, 8, 13):
+                    self.show_error("Invalid story points. Must be 1, 2, 3, 5, 8, or 13.")
+                    # Clean up and restart
+                    self._pending_edit_task = None
+                    self._pending_task_title = None
+                    self._pending_task_due_date = None
+                    self._pending_task_priority = None
+                    self._pending_task_story_points = None
+                    self.command_input.placeholder = "Type a command... (type 'help' for commands)"
+                    return
+                self._pending_task_story_points = sp
+            except ValueError:
+                self.show_error("Invalid story points. Must be a number: 1, 2, 3, 5, 8, or 13.")
+                # Clean up and restart
+                self._pending_edit_task = None
+                self._pending_task_title = None
+                self._pending_task_due_date = None
+                self._pending_task_priority = None
+                self._pending_task_story_points = None
+                self.command_input.placeholder = "Type a command... (type 'help' for commands)"
+                return
+        else:
+            self._pending_task_story_points = task['story_points']  # Keep current
+
+        # Move to description prompt
+        current_desc = task['description'] if task['description'] else "none"
+        # Truncate description if too long for display
+        if len(current_desc) > 50:
+            current_desc = current_desc[:47] + "..."
+        self.command_input.placeholder = f"Edit description (current: {current_desc}) - 'clear'/Enter to skip..."
+        self._awaiting_edit_description = True
+
+    def _handle_edit_description_input(self, description_str: str) -> None:
+        """Handle edit description input.
+
+        Args:
+            description_str: New description string (empty to keep current, 'clear' to remove)
+        """
+        self._awaiting_edit_description = False
+
+        task = self._pending_edit_task
+
+        # Store the new description temporarily
+        if description_str.strip().lower() == 'clear':
+            self._pending_task_description = ""  # Clear the description
+        elif description_str.strip():
+            self._pending_task_description = description_str.strip()
+        else:
+            self._pending_task_description = task['description']  # Keep current
+
         # Get current blocking task IDs
         blocking_ids = task_commands.get_tasks_blocking(task['id'])
         blocking_numbers = []
@@ -2125,13 +2253,40 @@ Or press Enter to leave panel empty"""
 
         task = self._pending_edit_task
         new_title = self._pending_task_title if self._pending_task_title else task['title']
-        new_due_date = self._pending_task_due_date
+        new_due_date = self._pending_task_due_date if self._pending_task_due_date is not None else task['due_date']
+
+        # Handle priority - convert empty string to None for clearing
+        if self._pending_task_priority == "":
+            new_priority = None
+        elif self._pending_task_priority is not None:
+            new_priority = self._pending_task_priority
+        else:
+            new_priority = task['priority']
+
+        # Handle story points - convert 0 to None for clearing
+        if self._pending_task_story_points == 0:
+            new_story_points = None
+        elif self._pending_task_story_points is not None:
+            new_story_points = self._pending_task_story_points
+        else:
+            new_story_points = task['story_points']
+
+        # Handle description - convert empty string to None for clearing
+        if self._pending_task_description == "":
+            new_description = None
+        elif self._pending_task_description is not None:
+            new_description = self._pending_task_description
+        else:
+            new_description = task['description']
 
         # Update the task
         success = task_commands.update_task(
             task_id=task['id'],
             title=new_title,
-            due_date=new_due_date
+            due_date=new_due_date,
+            priority=new_priority,
+            story_points=new_story_points,
+            description=new_description,
         )
 
         if not success:
@@ -2139,6 +2294,9 @@ Or press Enter to leave panel empty"""
             self._pending_edit_task = None
             self._pending_task_title = None
             self._pending_task_due_date = None
+            self._pending_task_priority = None
+            self._pending_task_story_points = None
+            self._pending_task_description = None
             return
 
         # Update dependencies
@@ -2171,6 +2329,9 @@ Or press Enter to leave panel empty"""
         self._pending_edit_task = None
         self._pending_task_title = None
         self._pending_task_due_date = None
+        self._pending_task_priority = None
+        self._pending_task_story_points = None
+        self._pending_task_description = None
 
     def action_clear_input(self) -> None:
         """Clear the command input."""
