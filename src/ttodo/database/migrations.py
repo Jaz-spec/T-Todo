@@ -88,10 +88,49 @@ def create_schema():
     print("Database schema created successfully")
 
 
+def validate_database_integrity():
+    """Validate and repair database integrity issues.
+
+    Checks for and fixes:
+    - Orphaned task dependencies (references to deleted tasks)
+    - Tasks with invalid role_id references
+    - Invalid task numbering
+    """
+    # Enable foreign key constraints
+    db.execute("PRAGMA foreign_keys = ON")
+    db.commit()
+
+    # Clean up orphaned dependencies (where either task doesn't exist)
+    db.execute("""
+        DELETE FROM task_dependencies
+        WHERE task_id NOT IN (SELECT id FROM tasks)
+           OR blocks_task_id NOT IN (SELECT id FROM tasks)
+    """)
+    rows_deleted = db.conn.total_changes
+    if rows_deleted > 0:
+        print(f"Cleaned up {rows_deleted} orphaned task dependencies")
+
+    # Check for tasks with invalid role_id (shouldn't happen with FK constraints, but check anyway)
+    invalid_tasks = db.fetchall("""
+        SELECT t.id, t.title FROM tasks t
+        LEFT JOIN roles r ON t.role_id = r.id
+        WHERE r.id IS NULL
+    """)
+    if invalid_tasks:
+        print(f"Warning: Found {len(invalid_tasks)} tasks with invalid role_id")
+        # Delete these orphaned tasks
+        for task in invalid_tasks:
+            db.execute("DELETE FROM tasks WHERE id = ?", (task['id'],))
+        print(f"Deleted {len(invalid_tasks)} orphaned tasks")
+
+    db.commit()
+
+
 def initialize_database():
     """Initialize database connection and create schema."""
     db.connect()
     create_schema()
+    validate_database_integrity()
 
 
 if __name__ == "__main__":

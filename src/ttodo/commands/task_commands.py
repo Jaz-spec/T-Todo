@@ -1,6 +1,7 @@
 """Task management commands."""
 from ttodo.database.models import db
 from ttodo.utils.date_utils import parse_date
+from ttodo.utils import validators
 from typing import Optional
 import json
 
@@ -439,12 +440,13 @@ def would_create_circular_dependency(task_id: int, blocks_task_id: int) -> bool:
     return False
 
 
-def validate_blocking_task_ids(role_id: int, blocking_ids_str: Optional[str]) -> tuple[list[int], Optional[str]]:
-    """Validate and parse blocking task IDs.
+def validate_blocking_task_ids(role_id: int, blocking_ids_str: Optional[str], task_id: Optional[int] = None) -> tuple[list[int], Optional[str]]:
+    """Validate and parse blocking task IDs with circular dependency detection.
 
     Args:
         role_id: Role ID (tasks must be in same role)
         blocking_ids_str: Comma-separated task numbers (e.g., "1,3,5")
+        task_id: ID of task being edited (for circular dependency check), None for new tasks
 
     Returns:
         Tuple of (list of valid task IDs, error message or None)
@@ -473,5 +475,12 @@ def validate_blocking_task_ids(role_id: int, blocking_ids_str: Optional[str]) ->
 
     if invalid_numbers:
         return ([], f"Invalid task numbers: {', '.join(invalid_numbers)}")
+
+    # Check for circular dependencies if task_id is provided (editing existing task)
+    if task_id:
+        for blocking_id in valid_task_ids:
+            is_circular, error_msg = validators.detect_circular_dependency(blocking_id, task_id)
+            if is_circular:
+                return ([], error_msg)
 
     return (valid_task_ids, None)
