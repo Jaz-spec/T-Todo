@@ -13,6 +13,7 @@ from ttodo.ui.multi_panel_grid import MultiPanelGrid
 from ttodo.ui.kanban import KanbanBoard
 from ttodo.utils.colors import ROLE_COLORS, get_role_color, get_active_color
 from ttodo.utils.archive import ArchiveScheduler
+from ttodo.utils import validators
 import re
 
 
@@ -691,9 +692,13 @@ class TodoApp(App):
             self.action_quit()
             return
 
-        # Help command
+        # Help command (support categories: help, help roles, help tasks, help windows, help kanban)
         elif command == "help":
-            self.show_help()
+            if parts and len(parts) > 0:
+                category = parts[0].lower()
+                self.show_help(category)
+            else:
+                self.show_help()
             return
 
         # New role command
@@ -754,12 +759,14 @@ class TodoApp(App):
         elif command == "window":
             if parts and parts[0].isdigit():
                 panel_count = int(parts[0])
-                if 1 <= panel_count <= 8:
+                # Validate panel count using validators
+                is_valid, error_msg = validators.validate_window_panel_count(panel_count)
+                if is_valid:
                     self.create_window_layout(panel_count)
                 else:
-                    self.show_error("Panel count must be between 1 and 8")
+                    self.show_error(error_msg)
             else:
-                self.show_error("Usage: window [1-8]")
+                self.show_error("Usage: window [1-8] - Create a multi-panel layout")
             return
 
         # Close command (close current panel)
@@ -793,8 +800,12 @@ class TodoApp(App):
                 f"Unknown command: {command_str}\n\nType 'help' for available commands."
             )
 
-    def show_help(self) -> None:
-        """Display help information."""
+    def show_help(self, category: str = None) -> None:
+        """Display help information, optionally filtered by category.
+
+        Args:
+            category: Optional category filter (roles, tasks, windows, kanban)
+        """
         # Save current state before showing help
         if not self._in_help_view:
             self._pre_help_state = {
@@ -807,47 +818,210 @@ class TodoApp(App):
             }
             self._in_help_view = True
 
-        help_text = """
+        if category == "roles":
+            help_text = """
+Terminal Todo - Role Commands Help
+
+ROLE MANAGEMENT:
+
+  new role             Create a new role (interactive prompts)
+                       Example: 'new role' → enters role name → auto-assigns color
+
+  r[number]            Select a role for working with tasks
+                       Example: 'r1' selects role 1
+                                'r3' selects role 3
+
+  role remap           Reassign role display numbers
+                       Example: 'role remap' → shows current mappings → enter new numbers
+
+  delete               Delete the currently active role
+                       Note: Cannot delete roles with tasks. Delete or move tasks first.
+                       Example: 'r2' → 'delete' → confirm with 'yes'
+
+TIPS:
+  - Roles organize tasks by context (e.g., Work, Personal, Learning)
+  - Each role has a unique color for visual identification
+  - You must select a role before adding tasks to it
+  - Role numbers can be remapped to match your preference
+
+Type 'help' to see all commands, or 'r' to return to previous view
+"""
+        elif category == "tasks":
+            help_text = """
+Terminal Todo - Task Commands Help
+
+TASK MANAGEMENT:
+
+  add                  Add a new task to the active role (interactive)
+                       Prompts: Title → Due Date → Priority → Story Points →
+                               Description → Blocked By
+                       Example: 'add' → follow prompts
+
+  t[number] edit       Edit an existing task (interactive)
+                       Shows current values, allows updating or keeping each field
+                       Use 'clear' to remove optional fields
+                       Example: 't5 edit' → follow prompts
+
+  t[number] delete     Delete a task
+                       Example: 't3 delete' → confirm with 'yes'
+
+  t[number] doing      Mark task as in progress
+                       Example: 't4 doing'
+
+  t[number] done       Mark task as completed
+                       Example: 't5 done'
+
+  t[number] todo       Move task back to to-do status
+                       Example: 't6 todo'
+
+TASK PROPERTIES:
+  - Title: Required, up to 200 characters
+  - Due Date: Optional, formats: DD MM YY, 'tomorrow', 'today', '+3d'
+  - Priority: Optional, High/Medium/Low
+  - Story Points: Optional, Fibonacci: 1, 2, 3, 5, 8, or 13
+  - Description: Optional, up to 2000 characters (displays first 80)
+  - Blocked By: Optional, comma-separated task numbers (e.g., '1,3,5')
+
+TIPS:
+  - Tasks with no due date appear at the bottom of lists
+  - In-progress tasks appear at the top with a separator
+  - Blocked tasks appear dimmed in the display
+  - Circular dependencies are automatically prevented
+
+Type 'help' to see all commands, or 'r' to return to previous view
+"""
+        elif category == "windows":
+            help_text = """
+Terminal Todo - Window Management Help
+
+WINDOW COMMANDS:
+
+  window [1-8]         Create a multi-panel layout
+                       Example: 'window 2' creates 2 panels side-by-side
+                                'window 4' creates a 2×2 grid
+                       After command, you'll select a role for each panel
+
+  close                Close the currently focused panel
+                       Example: 'close' removes focused panel from layout
+
+  Tab                  Cycle focus between panels
+                       The focused panel has a brighter border
+                       Input commands affect the focused panel
+
+KEYBOARD NAVIGATION:
+  - Esc: Enter navigation mode (allows scrolling/moving panels)
+  - Arrow keys: Scroll content in focused panel (navigation mode)
+  - Space+Arrow: Move focused panel position (navigation mode)
+  - Any letter: Exit navigation mode and return to command mode
+
+LAYOUT CONFIGURATIONS:
+  1 panel:  Full screen
+  2 panels: Side by side (50/50)
+  3 panels: Left 50% + Right top/bottom 25% each
+  4 panels: 2×2 grid (25% each)
+  5 panels: Left 50% + Right 3 stacked (16.6% each)
+  6 panels: 2×3 grid
+  7 panels: Left 3 stacked + Right 4 stacked
+  8 panels: Left 4 stacked + Right 4 stacked (maximum)
+
+TIPS:
+  - Layout is saved automatically between sessions
+  - Each panel shows a different role's tasks
+  - Panel colors match their role's color
+  - Focused panel's color is brighter
+
+Type 'help' to see all commands, or 'r' to return to previous view
+"""
+        elif category == "kanban":
+            help_text = """
+Terminal Todo - Kanban View Help
+
+KANBAN COMMANDS:
+
+  k                    Switch to kanban board view for active role
+                       Shows three columns: TODO | DOING | DONE
+                       Example: 'r2' → 'k' shows role 2's kanban
+
+  r                    Return to previous view (role panel or multi-panel)
+                       Example: 'r' exits kanban back to normal view
+
+KANBAN FEATURES:
+  - Displays all tasks for the selected role in three status columns
+  - TODO: Tasks not yet started
+  - DOING: Tasks currently in progress
+  - DONE: Completed tasks
+  - Each task card shows: title, due date, priority, story points,
+    description, and blocking relationships
+
+WORKING IN KANBAN VIEW:
+  - All task commands work the same: t[number] edit, t[number] doing, etc.
+  - Use status commands to move tasks between columns:
+    · 't5 doing' moves task 5 to DOING column
+    · 't5 done' moves task 5 to DONE column
+    · 't5 todo' moves task 5 back to TODO column
+  - The view automatically updates after each command
+
+TIPS:
+  - Kanban view focuses on one role at a time
+  - Great for visualizing workflow and progress
+  - Blocked tasks appear dimmed in all columns
+  - Tasks in DONE for >24 hours are auto-archived
+
+Type 'help' to see all commands, or 'r' to return to previous view
+"""
+        else:
+            # Default comprehensive help
+            help_text = """
 Terminal Todo - Help
 
+OVERVIEW:
+  Terminal Todo is a role-based task manager with multi-panel views and kanban boards.
+  Use 'help [category]' for detailed help on specific topics.
+
+HELP CATEGORIES:
+  help roles           Detailed help for role management commands
+  help tasks           Detailed help for task management commands
+  help windows         Detailed help for window/panel management
+  help kanban          Detailed help for kanban board view
+
+QUICK REFERENCE:
+
 Role Management:
-  new role             Create a new role (interactive prompts)
+  new role             Create a new role
   r[number]            Select a role (e.g., r1, r2)
   role remap           Reassign role numbers
-  delete               Delete the currently active role (must have no tasks)
+  delete               Delete active role (must have no tasks)
 
 Task Management:
-  add                  Add a task to the active role (interactive prompts)
-  t[number] edit       Edit a task (e.g., t2 edit)
-  t[number] delete     Delete a task (e.g., t3 delete)
-  t[number] doing      Mark task as in progress (e.g., t4 doing)
-  t[number] done       Mark task as completed (e.g., t5 done)
-  t[number] todo       Mark task as to-do (e.g., t6 todo)
+  add                  Add task (interactive)
+  t[number] edit       Edit task (interactive)
+  t[number] delete     Delete task
+  t[number] doing      Mark in progress
+  t[number] done       Mark completed
+  t[number] todo       Mark as to-do
 
 View Modes:
-  k                    Switch to kanban board view (TODO | DOING | DONE columns)
-  r                    Return to previous view (from help or kanban)
+  k                    Kanban board view
+  r                    Return to previous view
 
 Window Management:
-  window [1-8]         Create multi-panel layout (e.g., window 2, window 4)
-  close                Close currently focused panel
+  window [1-8]         Create multi-panel layout
+  close                Close focused panel
   Tab                  Switch focus between panels
 
 Utility:
   undo                 Undo last deletion
-  help                 Show this help message
-  exit                 Exit the application (or press Ctrl+C)
+  exit                 Exit application (or Ctrl+C)
 
 Keyboard Shortcuts:
-  Ctrl+C               Quit application
-  Esc                  Enter navigation mode (when input is empty)
-  Tab                  Focus next panel (in multi-panel mode)
-  Arrow keys           Command history (cmd mode) or scroll panel (nav mode)
-  Space+Arrow          Move panel position (in navigation mode)
-  Any letter           Exit navigation mode and return to command mode
+  Ctrl+C               Quit
+  Esc                  Navigation mode (when input empty)
+  Arrow keys           History (cmd) / Scroll (nav)
+  Space+Arrow          Move panel (nav mode)
 
-Status: Iteration 6 - Navigation Mode & Role Management
+Status: Iteration 8 - Depth and Robustness Complete
 
+For detailed help on any category, use: help [roles|tasks|windows|kanban]
 Press 'r' to return to previous view
 """
         self.update_content(help_text)
@@ -870,9 +1044,13 @@ Press 'r' to return to previous view
         self._awaiting_role_name = False
         self.command_input.placeholder = "Type a command... (type 'help' for commands)"
 
-        if not role_name or not role_name.strip():
-            self.show_error("Role name cannot be empty")
+        # Validate role name using validators
+        is_valid, error_msg, normalized_name = validators.validate_role_name(role_name)
+        if not is_valid:
+            self.show_error(error_msg)
             return
+
+        role_name = normalized_name
 
         # Auto-assign next color
         color_index = role_commands.get_next_color_index()
@@ -1622,14 +1800,16 @@ Or press Enter to leave panel empty"""
         """
         self._awaiting_task_title = False
 
-        if not title or not title.strip():
-            self.show_error("Task title cannot be empty")
+        # Validate task title using validators
+        is_valid, error_msg, normalized_title = validators.validate_task_title(title)
+        if not is_valid:
+            self.show_error(error_msg)
             self.command_input.placeholder = (
                 "Type a command... (type 'help' for commands)"
             )
             return
 
-        self._pending_task_title = title
+        self._pending_task_title = normalized_title
         self._awaiting_task_due_date = True
         self.command_input.placeholder = "Due date (today/tomorrow/DD MM YY or Enter to skip)..."
 
@@ -1646,7 +1826,17 @@ Or press Enter to leave panel empty"""
             due_date_str: Due date string
         """
         self._awaiting_task_due_date = False
-        self._pending_task_due_date = due_date_str if due_date_str.strip() else None
+
+        # Validate date using validators
+        is_valid, error_msg, normalized_date = validators.validate_date(due_date_str)
+        if not is_valid:
+            self.show_error(error_msg)
+            # Clean up and restart
+            self._pending_task_title = None
+            self._pending_task_due_date = None
+            self.command_input.placeholder = "Type a command... (type 'help' for commands)"
+            return
+        self._pending_task_due_date = normalized_date
 
         # Now prompt for priority
         self._awaiting_task_priority = True
@@ -1660,20 +1850,17 @@ Or press Enter to leave panel empty"""
         """
         self._awaiting_task_priority = False
 
-        # Validate priority if provided
-        if priority_str.strip():
-            priority_capitalized = priority_str.strip().capitalize()
-            if priority_capitalized not in ('High', 'Medium', 'Low'):
-                self.show_error("Invalid priority. Must be High, Medium, or Low.")
-                # Clean up and restart
-                self._pending_task_title = None
-                self._pending_task_due_date = None
-                self._pending_task_priority = None
-                self.command_input.placeholder = "Type a command... (type 'help' for commands)"
-                return
-            self._pending_task_priority = priority_capitalized
-        else:
+        # Validate priority using validators
+        is_valid, error_msg, normalized_priority = validators.validate_priority(priority_str)
+        if not is_valid:
+            self.show_error(error_msg)
+            # Clean up and restart
+            self._pending_task_title = None
+            self._pending_task_due_date = None
             self._pending_task_priority = None
+            self.command_input.placeholder = "Type a command... (type 'help' for commands)"
+            return
+        self._pending_task_priority = normalized_priority
 
         # Now prompt for story points
         self._awaiting_task_story_points = True
@@ -1687,31 +1874,18 @@ Or press Enter to leave panel empty"""
         """
         self._awaiting_task_story_points = False
 
-        # Validate story points if provided
-        if story_points_str.strip():
-            try:
-                sp = int(story_points_str.strip())
-                if sp not in (1, 2, 3, 5, 8, 13):
-                    self.show_error("Invalid story points. Must be 1, 2, 3, 5, 8, or 13.")
-                    # Clean up and restart
-                    self._pending_task_title = None
-                    self._pending_task_due_date = None
-                    self._pending_task_priority = None
-                    self._pending_task_story_points = None
-                    self.command_input.placeholder = "Type a command... (type 'help' for commands)"
-                    return
-                self._pending_task_story_points = sp
-            except ValueError:
-                self.show_error("Invalid story points. Must be a number: 1, 2, 3, 5, 8, or 13.")
-                # Clean up and restart
-                self._pending_task_title = None
-                self._pending_task_due_date = None
-                self._pending_task_priority = None
-                self._pending_task_story_points = None
-                self.command_input.placeholder = "Type a command... (type 'help' for commands)"
-                return
-        else:
+        # Validate story points using validators
+        is_valid, error_msg, normalized_sp = validators.validate_story_points_string(story_points_str)
+        if not is_valid:
+            self.show_error(error_msg)
+            # Clean up and restart
+            self._pending_task_title = None
+            self._pending_task_due_date = None
+            self._pending_task_priority = None
             self._pending_task_story_points = None
+            self.command_input.placeholder = "Type a command... (type 'help' for commands)"
+            return
+        self._pending_task_story_points = normalized_sp
 
         # Now prompt for description
         self._awaiting_task_description = True
@@ -2117,7 +2291,17 @@ Or press Enter to leave panel empty"""
         if due_date_str.strip().lower() == 'clear':
             self._pending_task_due_date = ""  # Clear the due date
         elif due_date_str.strip():
-            self._pending_task_due_date = due_date_str.strip()
+            # Validate date using validators
+            is_valid, error_msg, normalized_date = validators.validate_date(due_date_str)
+            if not is_valid:
+                self.show_error(error_msg)
+                # Clean up and restart
+                self._pending_edit_task = None
+                self._pending_task_title = None
+                self._pending_task_due_date = None
+                self.command_input.placeholder = "Type a command... (type 'help' for commands)"
+                return
+            self._pending_task_due_date = normalized_date
         else:
             self._pending_task_due_date = task['due_date']  # Keep current
 
@@ -2140,9 +2324,9 @@ Or press Enter to leave panel empty"""
         if priority_str.strip().lower() == 'clear':
             self._pending_task_priority = ""  # Clear the priority
         elif priority_str.strip():
-            priority_capitalized = priority_str.strip().capitalize()
-            if priority_capitalized not in ('High', 'Medium', 'Low'):
-                self.show_error("Invalid priority. Must be High, Medium, or Low.")
+            is_valid, error_msg, normalized_priority = validators.validate_priority(priority_str)
+            if not is_valid:
+                self.show_error(error_msg)
                 # Clean up and restart
                 self._pending_edit_task = None
                 self._pending_task_title = None
@@ -2150,7 +2334,7 @@ Or press Enter to leave panel empty"""
                 self._pending_task_priority = None
                 self.command_input.placeholder = "Type a command... (type 'help' for commands)"
                 return
-            self._pending_task_priority = priority_capitalized
+            self._pending_task_priority = normalized_priority
         else:
             self._pending_task_priority = task['priority']  # Keep current
 
@@ -2173,21 +2357,9 @@ Or press Enter to leave panel empty"""
         if story_points_str.strip().lower() == 'clear':
             self._pending_task_story_points = 0  # Clear (use 0 as sentinel for None)
         elif story_points_str.strip():
-            try:
-                sp = int(story_points_str.strip())
-                if sp not in (1, 2, 3, 5, 8, 13):
-                    self.show_error("Invalid story points. Must be 1, 2, 3, 5, 8, or 13.")
-                    # Clean up and restart
-                    self._pending_edit_task = None
-                    self._pending_task_title = None
-                    self._pending_task_due_date = None
-                    self._pending_task_priority = None
-                    self._pending_task_story_points = None
-                    self.command_input.placeholder = "Type a command... (type 'help' for commands)"
-                    return
-                self._pending_task_story_points = sp
-            except ValueError:
-                self.show_error("Invalid story points. Must be a number: 1, 2, 3, 5, 8, or 13.")
+            is_valid, error_msg, normalized_sp = validators.validate_story_points_string(story_points_str)
+            if not is_valid:
+                self.show_error(error_msg)
                 # Clean up and restart
                 self._pending_edit_task = None
                 self._pending_task_title = None
@@ -2196,6 +2368,7 @@ Or press Enter to leave panel empty"""
                 self._pending_task_story_points = None
                 self.command_input.placeholder = "Type a command... (type 'help' for commands)"
                 return
+            self._pending_task_story_points = normalized_sp
         else:
             self._pending_task_story_points = task['story_points']  # Keep current
 
