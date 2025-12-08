@@ -8,18 +8,12 @@ A terminal-based productivity tool for managing role-based to-do lists with wind
 
 ## 2. Technology Stack
 
-- **Language**: Python 3.10+
-- **TUI Framework**: Rich or Textual (recommended: Textual for better keyboard handling)
+- **Language**: Python
+- **Runtime**: Bun
+- **TUI Frameworks**: Rich and Click
 - **Database**: SQLite3
-- **Dependencies**:
-  - `textual` or `rich` for TUI
-  - `sqlite3` (built-in)
-  - `python-dateutil` for date parsing
-  - `prompt_toolkit` for input handling with history
 
 ## 3. Data Model
-
-### 3.1 Database Schema
 
 ```sql
 -- Roles table
@@ -77,24 +71,18 @@ CREATE TABLE archived_tasks (
     task_id INTEGER PRIMARY KEY,
     archived_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-```
 
-### 3.2 Color Palette (Autumnal Theme)
+-- Performance indexes
+CREATE INDEX IF NOT EXISTS idx_tasks_role_status
+ON tasks(role_id, status, due_date);
 
-```python
-ROLE_COLORS = [
-    "#D4A574",  # Tan
-    "#C17817",  # Dark Orange
-    "#8B4513",  # Saddle Brown
-    "#CD853F",  # Peru
-    "#A0522D",  # Sienna
-    "#DAA520",  # Goldenrod
-    "#B8860B",  # Dark Goldenrod
-    "#8B7355",  # Burlywood Dark
-]
+CREATE INDEX IF NOT EXISTS idx_tasks_due_date
+ON tasks(due_date);
 ```
 
 ## 4. User Interface Layout
+- layout does not affect input behaviour of the app with the exeption of the task view. The only command available in task view is [esc] OR [any key]to exit the view.
+
 ### 4.1 Screen Structure
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -110,159 +98,6 @@ ROLE_COLORS = [
 ```
 
 ### 4.2 Role Panel Layout
-
-```
-┌─ Role Name (rX) ──────────────────────-┐
-│                                        │
-│ ┄┄┄┄┄┄┄┄┄ IN PROGRESS ┄┄┄┄┄┄┄┄┄┄┄┄┄┄   │
-│ t1: Task title - Tomorrow              │
-│ t2: Another task - Next Monday         │
-│ ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄   │
-│                                        │
-│ t3: Task title - Yesterday             │
-│ t4: Task with dep - Tues 15 Oct        │
-│ t5: Another task - 20 Oct              │
-│                                        │
-└────────────────────────────────────────┘
-```
-
-**Visual Details**:
-- Border radius: 4px equivalent in terminal chars
-- Gap between panels: 2 characters
-- Active panel: brighter role color
-- Inactive panels: normal role color
-- Blocked tasks: dulled shade of role color (70% brightness)
-- In-progress separator: thin dashed line in role color
-
-### 4.3 Kanban View Layout
-
-```
-┌─ Role Name (rX) - KANBAN ────────────────────────────────┐
-│                                                           │
-│  TODO              DOING              DONE               │
-│ ┌────────────┐    ┌────────────┐    ┌────────────┐      │
-│ │t1: Task    │    │t2: Task    │    │t5: Task    │      │
-│ │  Due: Tmrw │    │  Due: Mon  │    │  Completed │      │
-│ │  Pri: High │    │  Pri: Med  │    │  SP: 5     │      │
-│ │  SP: 3     │    │  SP: 8     │    │             │      │
-│ │            │    │            │    │             │      │
-│ │t3: Task    │    │            │    │             │      │
-│ │  Due: 15Oct│    │            │    │             │      │
-│ │  Pri: Low  │    │            │    │             │      │
-│ │  SP: 2     │    │            │    │             │      │
-│ └────────────┘    └────────────┘    └────────────┘      │
-└───────────────────────────────────────────────────────────┘
-```
-
-### 4.4 Task Detail View
-
-```
-┌─ Task Details ──────────────────────────────────────────┐
-│                                                          │
-│ Task: t4 - Call boss about project                      │
-│                                                          │
-│ Due: Tomorrow (15 Oct 2025)                             │
-│ Priority: High                                           │
-│ Story Points: 5                                          │
-│ Status: In Progress                                      │
-│                                                          │
-│ Blocks: t7, t9                                          │
-│ Blocked by: t2                                          │
-│                                                          │
-│ Description:                                             │
-│ ─────────────────────────────────────────────────────   │
-│ Need to discuss the following:                          │
-│ - Budget allocation                                      │
-│ - Timeline adjustments                                   │
-│ - Resource requirements                                  │
-│                                                          │
-│                                                          │
-│ [Press any key to return]                               │
-└──────────────────────────────────────────────────────────┘
-```
-
-## 5. Input Modes
-
-### 5.1 Command Mode (Default)
-- Text input box active
-- Type commands
-- Arrow up/down: cycle command history
-- Enter: execute command
-- Esc: clear current input
-
-### 5.2 Navigation Mode
-- Arrow keys: scroll through focused panel
-- Space + Arrow keys: move window position
-- Tab: cycle focus between visible panels
-- Esc: return to command mode
-- Any text key: return to command mode and start typing
-
-**Mode Indicator**: Show "(nav)" in corner of command box when in navigation mode
-
-## 6. Command Reference
-
-### 6.1 Role Management
-
-#### Create New Role
-```
-> new role
-Role name: _
-[user types and presses enter]
-Select color: [TAB to cycle through colors, ENTER to confirm]
-```
-
-**Process**:
-1. Input box expands to 1/3 screen height
-2. Prompt for role name
-3. Show color selector with visual preview
-4. Assign next available display number
-5. Create role in database
-6. Return to normal view
-
-#### List Roles
-```
-> r [TAB to cycle through roles]
-Shows: r1 - Work, r2 - Personal, r3 - Learning, ...
-```
-
-#### Remap Role Numbers
-```
-> role remap
-[Shows full list with current numbers]
-1: Work
-2: Personal
-3: Learning
-
-Enter new mapping (leave blank to keep current):
-Work: 3
-Personal: 1
-Learning: 2
-```
-
-#### Select Role
-```
-> r5
-[Selects role 5 as active, all subsequent commands apply to this role]
-[Visual indicator shows which role is active]
-```
-
-#### Delete Role
-```
-> delete
-Are you sure you want to delete role "Work"? (yes/no): _
-```
-
-### 6.2 Window Management
-
-#### Create Window Layout
-```
-> window 3
-[Shows role selector, TAB to cycle, ENTER to confirm each]
-Panel 1: [TAB through roles]
-Panel 2: [TAB through roles]
-Panel 3: [TAB through roles]
-```
-
 **Layout Priority**:
 - 1 panel: full screen
 - 2 panels: side by side (50/50)
@@ -273,121 +108,110 @@ Panel 3: [TAB through roles]
 - 7 panels: left 3 stacked + right 4 stacked
 - 8 panels: left 4 stacked + right 4 stacked (max)
 
-#### Close Window
 ```
-> close
-[Closes currently focused panel]
-```
-
-### 6.3 Task Management (Role View)
-
-#### Add Task (Interactive)
-```
-> add
-Title: _
-[user types and presses enter]
-Description (optional, press ENTER to skip or type multi-line with SHIFT+ENTER): _
-Due date (optional, format DD MM YY): _
-Priority (High/Medium/Low, optional): _
-Story points (1,2,3,5,8,13, optional): _
-Blocked by task IDs (comma-separated, optional): _
-```
-
-#### Quick Add Task
-```
-> add "Call boss" 15 10 25 High 5
-[Creates task with: title, due date, priority, story points]
-
-> add "Quick task"
-[Creates task with just title, rest defaults]
+┌─ Role Name (rX) ──────────────────────-┐
+│                                        │
+│ ┄┄┄┄┄┄┄┄┄ IN PROGRESS ┄┄┄┄┄┄┄┄┄┄┄┄┄┄   │
+│ t1: Task title                         │
+│   Due: Tomorrow | Pri: High | SP: 3    │
+│   Blocked by: t2 | Blocks: t4          │
+│   Desc: Description preview...         │
+│                                        │
+│ t2: Another task                       │
+│   Due: Next Monday | Pri: Medium       │
+│ ┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄┄   │
+│                                        │
+│ t3: Task title                         │
+│   Due: Yesterday | Pri: Low | SP: 5    │
+│                                        │
+│ t4: Task with dependencies             │
+│   Due: Tues 15 Oct | SP: 8             │
+│   Blocked by: t1, t3                   │
+│                                        │
+└────────────────────────────────────────┘
 ```
 
-#### View Task
+### 4.3 Kanban View Layout
+
 ```
-> t4 view
-[Shows full-screen task detail view]
+┌─ Role Name (rX) - KANBAN ────────────────────────────────┐
+│                                                          │
+│  TODO              DOING              DONE               │
+│ ┌────────────┐    ┌────────────┐    ┌────────────┐       │
+│ │t1: Task    │    │t2: Task    │    │t5: Task    │       │
+│ │  Due: Tmrw │    │  Due: Mon  │    │  Completed │       │
+│ │  Pri: High │    │  Pri: Med  │    │  SP: 5     │       │
+│ │  SP: 3     │    │  SP: 8     │    │            │       │
+│ │            │    │            │    │            │       │
+│ │t3: Task    │    │            │    │            │       │
+│ │  Due: 15Oct│    │            │    │            │       │
+│ │  Pri: Low  │    │            │    │            │       │
+│ │  SP: 2     │    │            │    │            │       │
+│ └────────────┘    └────────────┘    └────────────┘       │
+└──────────────────────────────────────────────────────────┘
 ```
 
-#### Edit Task
+### 4.4 Task Detail View
+
 ```
-> t4 edit
-[Goes through same prompts as add, showing current values]
-Title (Call boss): _
-Description (...): _
-[etc.]
+┌─ Task Details ──────────────────────────────────────────┐
+│                                                         │
+│ Task: t4 - Call boss about project                      │
+│                                                         │
+│ Due: Tomorrow (15 Oct 2025)                             │
+│ Priority: High                                          │
+│ Story Points: 5                                         │
+│ Status: In Progress                                     │
+│                                                         │
+│ Blocks: t7, t9                                          │
+│ Blocked by: t2                                          │
+│                                                         │
+│ Description:                                            │
+│ ─────────────────────────────────────────────────────   │
+│ Need to discuss the following:                          │
+│ - Budget allocation                                     │
+│ - Timeline adjustments                                  │
+│ - Resource requirements                                 │
+│                                                         │
+│                                                         │
+│ [Press any key to return]                               │
+└─────────────────────────────────────────────────────────┘
 ```
 
-#### Delete Task
-```
-> t4 delete
-Are you sure? (yes/no): _
-```
+## 5. Input Modes
+Modes change input behaviour of the app
 
-#### Mark Task Status
-```
-> t4 doing
-[Moves task to "doing" status]
+### 5.1 Command Mode (Default)
+Text input box active
 
-> t4 done
-[Moves task to "done" status, sets completed_at timestamp]
+#### Commands
+- [up down arrow keys]: cycle through command history
+- `h`: help box
+- `r`: switch to role view
+- `k`: switch to kanban view for selected role
+- `n`: adds new role
+- `m`: remap role IDs
+- `w`: adds role to window layout -> tab through available roles
+- `c`: removes active role from window layout
+- `a`: add task
+- `e[task-ID]`: edit task
+- `p[task-ID]`: task in progress
+- `d[task-ID]`: task done
+- `t[task-ID]`: moves task back to todo status
+- `v[task-ID]`: view task details
+- `D[task-ID]`: delete task
+- `Dr[role-ID]`: delete role
+- [TAB]: enter navigation mode
 
-> t4 todo
-[Moves task back to "todo" status]
-```
+### 5.2 Navigation Mode
+**Mode Indicator**: Show "(nav)" in corner of command box when in navigation mode
 
-#### Batch Operations
-```
-> t1,t3,t5 delete
-Are you sure you want to delete 3 tasks? (yes/no): _
-
-> t2,t4,t6 doing
-[Moves all specified tasks to doing]
-```
-
-### 6.4 Kanban View
-
-#### Enter Kanban View
-```
-> k
-[Shows kanban board for currently selected role]
-```
-
-#### Exit Kanban View
-```
-> r
-[Returns to role view]
-```
-
-Task commands work identically in kanban view (t4 edit, t4 doing, etc.)
-
-### 6.5 Utility Commands
-
-#### Help
-```
-> help
-[Shows command reference]
-
-> help roles
-[Shows role-specific commands]
-
-> help tasks
-[Shows task-specific commands]
-```
-
-#### Undo
-```
-> undo
-[Restores last deleted task or role]
-[Shows: "Restored task: 't4 - Call boss'"]
-```
-
-#### Exit
-```
-> exit
-[Exits application]
-
-Ctrl+C also exits
-```
+#### Commands
+- [arrow keys]: scroll through active panel to see more tasks in that role
+- [space + arrow keys]: move panel postion to different location on screen
+- [TAB]: cycle focus between visible panels
+- [Esc]: return to command mode
+- [Any text key]: return to command mode and start typing
 
 ## 7. Date Handling
 
@@ -432,11 +256,194 @@ beyond_7_days = "Tues 15 Oct", "Wed 23 Oct", etc.
 - Blocked task: 70% brightness
 - In-progress separator: 100% brightness, dashed line
 
-### 8.4 Empty States
+### 8.4 Colors
+    "#D4A574",  # Tan
+    "#C17817",  # Dark Orange
+    "#8B4513",  # Saddle Brown
+    "#CD853F",  # Peru
+    "#A0522D",  # Sienna
+    "#DAA520",  # Goldenrod
+    "#B8860B",  # Dark Goldenrod
+    "#8B7355",  # Burlywood Dark
+
+### 8.5 Empty States
 - Empty role panel: Shows panel with role name, no tasks listed
 - Empty kanban column: Shows column header, empty space below
 - No roles: Empty main area with hint text: "Type 'new role' to get started"
 
+---
+
+## Terminal To-Do App - Architecture Documentation
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                          UI LAYER                               │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
+│  │ InputHandler │  │   Display    │  │ CommandBox   │           │
+│  │   (Entry)    │  │  (Renderer)  │  │  (History)   │           │
+│  └──────────────┘  └──────────────┘  └──────────────┘           │
+│          ↓                                                      │
+│  ┌──────────────────────────────────────────────────┐           │
+│  │           InputContext (State Manager)           │           │
+│  └──────────────────────────────────────────────────┘           │
+│          ↓                    ↓                                 │
+│  ┌──────────────┐     ┌──────────────┐                          │
+│  │ CommandMode  │     │NavigationMode│                          │
+│  └──────────────┘     └──────────────┘                          │
+└─────────────────────────────────────────────────────────────────┘
+                           ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                    APPLICATION LAYER                            │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐           │
+│  │ TaskService  │  │ RoleService  │  │WindowManager │           │
+│  └──────────────┘  └──────────────┘  └──────────────┘           │
+│                                                                 │
+│  ┌──────────────────────────────────────────────────┐           │
+│  │         Commands (for undo operations)           │           │
+│  │  ┌──────────────┐     ┌──────────────┐           │           │
+│  │  │DeleteTaskCmd │     │DeleteRoleCmd │           │           │
+│  │  └──────────────┘     └──────────────┘           │           │
+│  └──────────────────────────────────────────────────┘           │
+│                                                                 │
+│  ┌──────────────┐                                               │
+│  │  UndoStack   │                                               │
+│  └──────────────┘                                               │
+└─────────────────────────────────────────────────────────────────┘
+                 ↓                        ↓
+┌──────────────────────────┐    ┌──────────────────────────┐
+│     DOMAIN LAYER         │    │      DATA LAYER          │
+│  ┌────────────────┐      │    │  ┌────────────────┐      │
+│  │     Task       │      │    │  │   Database     │      │
+│  │  (data+rules)  │      │    │  │ (connection)   │      │
+│  └────────────────┘      │    │  └────────────────┘      │
+│  ┌────────────────┐      │    │         ↓                │
+│  │     Role       │      │    │  ┌────────────────┐      │
+│  │  (data+rules)  │      │    │  │TaskRepository  │      │
+│  └────────────────┘      │    │  └────────────────┘      │
+│  ┌────────────────┐      │    │  ┌────────────────┐      │
+│  │   Priority     │      │    │  │RoleRepository  │      │
+│  │    (enum)      │      │    │  └────────────────┘      │
+│  └────────────────┘      │    │  ┌────────────────┐      │
+│  ┌────────────────┐      │    │  │WindowRepository│      │
+│  │    Status      │      │    │  └────────────────┘      │
+│  │    (enum)      │      │    │                          │
+│  └────────────────┘      │    └──────────────────────────┘
+└──────────────────────────┘
+```
+
+## Complete Class Relationships
+
+### UI Layer
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                        UI LAYER                                 │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  InputHandler                                                   │
+│    ├── has-a → InputContext                                     │
+│    └── delegates to → current_mode                              │
+│                                                                 │
+│  InputContext                                                   │
+│    ├── has-a → Application                                      │
+│    ├── has-a → CommandBox                                       │
+│    ├── has-a → WindowManager                                    │
+│    └── has-a → InputMode (current_mode)                         │
+│                                                                 │
+│  InputMode (abstract)                                           │
+│    ├── CommandMode                                              │
+│    │    └── implements → handle_key()                           │
+│    └── NavigationMode                                           │
+│         └── implements → handle_key()                           │
+│                                                                 │
+│  Display                                                        │
+│    ├── has-a → LayoutStrategy (TileLayout/KanbanLayout)         │
+│    └── uses → TaskRepository (to get data)                      │
+│                                                                 │
+│  LayoutStrategy (abstract)                                      │
+│    ├── TileLayout                                               │
+│    │    └── implements → render()                               │
+│    └── KanbanLayout                                             │
+│         └── implements → render()                               │
+│                                                                 │
+│  CommandBox                                                     │
+│    ├── stores → command history (List[str])                     │
+│    └── manages → current input text                             │
+│                                                                 │
+│  Panel                                                          │
+│    ├── displays → tasks for a role                              │
+│    └── manages → scroll position                                │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Application Layer
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                   APPLICATION LAYER                             │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Application                                                    │
+│    ├── has-a → TaskService                                      │
+│    ├── has-a → RoleService                                      │
+│    ├── has-a → WindowManager                                    │
+│    ├── has-a → UndoStack                                        │
+│    ├── has-a → CommandParser                                    │
+│    ├── has-a → ApplicationState                                 │
+│    └── method: execute_command(text: str)                       │
+│                                                                 │
+│  TaskService                                                    │
+│    ├── uses → TaskRepository                                    │
+│    ├── uses → RoleRepository                                    │
+│    ├── creates → Task (domain objects)                          │
+│    └── methods:                                                 │
+│        ├── add(title, role_id, due_date, ...)                   │
+│        ├── edit(task_id, **kwargs)                              │
+│        ├── mark_done(task_id)                                   │
+│        └── get_tasks_for_role(role_id)                          │
+│                                                                 │
+│  RoleService                                                    │
+│    ├── uses → RoleRepository                                    │
+│    └── methods:                                                 │
+│        ├── create(name, color)                                  │
+│        ├── get_all()                                            │
+│        └── delete(role_id)                                      │
+│                                                                 │
+│  WindowManager                                                  │
+│    ├── has-many → Panel                                         │
+│    ├── uses → WindowRepository                                  │
+│    └── methods:                                                 │
+│        ├── create_layout(panel_count, role_ids)                 │
+│        ├── focus_next_panel()                                   │
+│        └── get_focused_panel()                                  │
+│                                                                 │
+│  Command (abstract - only for undo operations)                  │
+│    ├── abstract methods:                                        │
+│    │    ├── execute(context)                                    │
+│    │    └── undo(context)                                       │
+│    ├── DeleteTaskCommand                                        │
+│    │     ├── uses → TaskRepository                              │
+│    │     └── stores → deleted task data                         │
+│    └── DeleteRoleCommand                                        │
+│          ├── uses → RoleRepository                              │
+│          └── stores → deleted role data                         │
+│                                                                 │
+│  UndoStack                                                      │
+│    ├── stores → List[Command]                                   │
+│    └── methods:                                                 │
+│        ├── push(command)                                        │
+│        └── pop() → Command                                      │
+│                                                                 │
+│  ApplicationState                                               │
+│    ├── current_role_id: int                                     │
+│    └── current_view_mode: ViewMode                              │
+│                                                                 │
+│  CommandParser                                                  │
+│    └── method: parse(text: str) → dict                          │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
 ## 9. Application Behavior
 
 ### 9.1 Auto-save
@@ -455,6 +462,7 @@ beyond_7_days = "Tues 15 Oct", "Wed 23 Oct", etc.
 - When task deleted, number is NOT reused
 - Display shows: `t1`, `t2`, `t3`, etc.
 - When new task added, gets next available number for that role
+- Task reset for a role with no tasks - restarts tasks from 1
 
 ### 9.4 Startup Behavior
 - Load saved window layout from database
@@ -462,175 +470,196 @@ beyond_7_days = "Tues 15 Oct", "Wed 23 Oct", etc.
 - No tutorial or prompts
 - Command box ready for input
 
-### 9.5 Error Handling
-```python
-# Error message examples
-"Task t99 not found in role r3"
-"Invalid command. Type 'help' for available commands"
-"Role r10 does not exist"
-"Invalid date format. Use DD MM YY"
-"Cannot delete role with active tasks. Move or delete tasks first"
-```
-
-### 9.6 Task Sorting
+### 9.5 Task Sorting
 Default sort order in role view:
 1. In-progress tasks (by due date, then created date)
 2. Separator line
 3. Todo tasks (by due date, then created date)
 4. Tasks without due date at bottom (by created date)
 
-## 10. Keyboard Shortcuts Summary
+### 9.6 Input Validation and Constraints
+Comprehensive validation system to ensure data integrity and provide helpful error messages:
 
-```
-COMMAND MODE (default)
-- Type any command
-- ↑/↓         Command history
-- Enter       Execute command
-- Esc         Clear input
-- Tab         Autocomplete (context-aware)
+#### 9.6.1 Length Constraints
+- **Role names**: Maximum 50 characters
+- **Task titles**: Maximum 200 characters
+- **Task descriptions**: Maximum 2000 characters
+- Error messages indicate the specific constraint violated
 
-NAVIGATION MODE
-- Arrow keys  Scroll in focused panel
-- Space+Arrow Move panel position
-- Tab         Cycle focus between panels
-- Esc         Return to command mode
-- Any letter  Start typing command
+#### 9.6.2 Value Normalization
+- **Priority**: Case-insensitive input, normalized to capitalized form
+  - Accepts: "high", "HIGH", "High" → Stored as: "High"
+  - Valid values: High, Medium, Low
+- **Status**: Case-insensitive, normalized to lowercase
+  - Accepts: "TODO", "todo", "ToDo" → Stored as: "todo"
+  - Valid values: todo, doing, done
 
-UNIVERSAL
-- Ctrl+C      Exit application
-```
-
-## 11. Implementation Notes
-
-### 11.1 Recommended Python Packages
-```python
-# requirements.txt
-textual>=0.40.0
-python-dateutil>=2.8.0
-sqlite3  # built-in
-rich>=13.0.0  # for markdown rendering
-```
-
-### 11.2 Project Structure
-```
-terminal_todo/
-├── main.py                 # Entry point
-├── app.py                  # Main TUI application class
-├── database/
-│   ├── __init__.py
-│   ├── models.py          # SQLAlchemy models or raw SQL
-│   └── migrations.py      # Schema setup
-├── ui/
-│   ├── __init__.py
-│   ├── panels.py          # Role panel widgets
-│   ├── kanban.py          # Kanban view widget
-│   ├── input_box.py       # Command input widget
-│   └── task_detail.py     # Task detail view
-├── commands/
-│   ├── __init__.py
-│   ├── parser.py          # Command parsing logic
-│   ├── role_commands.py
-│   ├── task_commands.py
-│   └── window_commands.py
-├── utils/
-│   ├── __init__.py
-│   ├── date_utils.py      # Date parsing and formatting
-│   ├── colors.py          # Color management
-│   └── validators.py      # Input validation
-└── config.py              # Constants and configuration
-```
-
-### 11.3 Performance Considerations
-- Lazy load tasks (only load visible tasks)
-- Index database on role_id, status, due_date
-- Debounce auto-save operations
-- Limit undo stack to last 20 operations
-
-### 11.4 Testing Strategy
-- Unit tests for command parser
-- Unit tests for date utilities
-- Integration tests for database operations
-- Manual TUI testing for layout and navigation
-
-## 12. Future Feature Placeholders
-
-Document these for future implementation:
-- Task filtering and advanced ordering
-- Customizable task detail visibility
-- Archive viewing and restoration
-- Export/import functionality
-- Multi-platform support (Windows, Linux)
-- Themes beyond autumnal
-- Recurring tasks
-- Time tracking
-- Search functionality
-- Statistics and reports
-
-## 13. MVP Checklist
-
-Priority order for implementation:
-
-1. ✓ Database schema and models
-2. ✓ Basic TUI framework setup
-3. ✓ Command input box with history
-4. ✓ Role creation and management
-5. ✓ Single role panel display
-6. ✓ Task CRUD operations (add, edit, delete, view)
-7. ✓ Task status management (todo/doing/done)
-8. ✓ Date parsing and relative display
-9. ✓ Window management (multiple panels)
-10. ✓ Navigation mode and keyboard controls
-11. ✓ Kanban view
-12. ✓ Task dependencies (blocking)
-13. ✓ Auto-archive completed tasks
-14. ✓ Undo for deletions
-15. ✓ Window layout persistence
-16. ✓ Help system
-17. ✓ Error handling and validation
-18. ✓ Polish and visual refinements
-
-## 14. Example Usage Flow
-
-```bash
-# First launch
-$ python main.py
-
-> new role
-Role name: Work
-Select color: [TAB] [TAB] [ENTER]
-
-> r1
-
-> add "Prepare presentation" 17 10 25 High 8
-> add "Email team update"
-> add "Review pull requests" 16 10 25 Medium 3
-
-> window 2
-Panel 1: [TAB to Work] [ENTER]
-Panel 2: [TAB to create new role or select existing]
-
-> new role
-Role name: Personal
-[Select color]
-
-> r2
-> add "Grocery shopping" tomorrow
-> add "Call dentist" 18 10 25
-
-> k
-[View kanban board for Personal]
-
-> t1 doing
-> r
-[Back to role view]
-
-> help
-[Shows command reference]
-```
+#### 9.6.3 Dependency Validation
+- **Circular dependency detection**: Prevents infinite blocking chains
+  - Algorithm recursively checks if adding a dependency would create a cycle
+  - Error message: "Cannot add dependency: would create circular dependency chain"
+- **Task existence validation**: Ensures blocking tasks exist in the same role
+- **Self-blocking prevention**: Tasks cannot block themselves
 
 ---
 
-## Document Version
-- Version: 1.0
-- Date: October 13, 2025
-- Status: Ready for Implementation
+### Domain Layer
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      DOMAIN LAYER                               │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Task                                                           │
+│    ├── Properties:                                              │
+│    │   ├── id: int                                              │
+│    │   ├── role_id: int                                         │
+│    │   ├── task_number: int                                     │
+│    │   ├── title: str                                           │
+│    │   ├── description: str                                     │
+│    │   ├── due_date: date                                       │
+│    │   ├── priority: Priority                                   │
+│    │   ├── story_points: int                                    │
+│    │   ├── status: Status                                       │
+│    │   └── completed_at: datetime                               │
+│    │                                                            │
+│    ├── Business Logic Methods:                                  │
+│    │   ├── mark_complete()                                      │
+│    │   ├── is_overdue() → bool                                  │
+│    │   ├── is_blocked() → bool                                  │
+│    │   ├── can_be_deleted() → bool                              │
+│    │   └── should_be_archived() → bool                          │
+│    │                                                            │
+│    └── Relationships:                                           │
+│        └── blocking_tasks: List[Task]                           │
+│                                                                 │
+│  Role                                                           │
+│    ├── Properties:                                              │
+│    │   ├── id: int                                              │
+│    │   ├── name: str                                            │
+│    │   ├── color: str                                           │
+│    │   ├── display_number: int                                  │
+│    │   └── created_at: datetime                                 │
+│    │                                                            │
+│    ├── Business Logic Methods:                                  │
+│    │   ├── has_active_tasks() → bool                            │
+│    │   └── validate_color() → bool                              │
+│    │                                                            │
+│    └── Validation:                                              │
+│        └── color must be in valid palette                       │
+│                                                                 │
+│  Status (enum)                                                  │
+│    ├── TODO                                                     │
+│    ├── DOING                                                    │
+│    └── DONE                                                     │
+│                                                                 │
+│  Priority (enum)                                                │
+│    ├── HIGH                                                     │
+│    ├── MEDIUM                                                   │
+│    └── LOW                                                      │
+│                                                                 │
+│  ViewMode (enum)                                                │
+│    ├── TILE                                                     │
+│    └── KANBAN                                                   │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Data Layer
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                       DATA LAYER                                │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  Database                                                       │
+│    ├── manages → SQLite connection                              │
+│    ├── property: connection                                     │
+│    └── methods:                                                 │
+│        ├── execute(query, params) → cursor                      │
+│        └── close()                                              │
+│                                                                 │
+│  TaskRepository                                                 │
+│    ├── depends-on → Database                                    │
+│    ├── converts → DB rows ↔ Task objects                        │
+│    └── methods:                                                 │
+│        ├── save(task: Task) → int                               │
+│        ├── get(task_id: int) → Task                             │
+│        ├── get_tasks_for_role(role_id: int) → List[Task]        │
+│        ├── delete(task_id: int)                                 │
+│        ├── get_next_task_number(role_id: int) → int             │
+│        └── _row_to_task(row) → Task (private)                   │
+│                                                                 │
+│  RoleRepository                                                 │
+│    ├── depends-on → Database                                    │
+│    ├── converts → DB rows ↔ Role objects                        │
+│    └── methods:                                                 │
+│        ├── save(role: Role) → int                               │
+│        ├── get(role_id: int) → Role                             │
+│        ├── get_all() → List[Role]                               │
+│        ├── delete(role_id: int)                                 │
+│        ├── exists(role_id: int) → bool                          │
+│        └── _row_to_role(row) → Role (private)                   │
+│                                                                 │
+│  WindowRepository                                               │
+│    ├── depends-on → Database                                    │
+│    └── methods:                                                 │
+│        ├── save_layout(panel_count, role_ids)                   │
+│        └── load_layout() → dict                                 │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+
+## File Structure
+
+```
+terminal_todo/
+│
+├── main.py                      # Entry point
+│
+├── ui/                          # UI LAYER
+│   ├── __init__.py
+│   ├── input_handler.py         # InputHandler
+│   ├── input_context.py         # InputContext
+│   ├── input_modes.py           # CommandMode, NavigationMode
+│   ├── display.py               # Display
+│   ├── renderers.py             # TileLayout, KanbanLayout
+│   ├── command_box.py           # CommandBox
+│   └── panel.py                 # Panel
+│
+├── application/                 # APPLICATION LAYER
+│   ├── __init__.py
+│   ├── application.py           # Application
+│   ├── services/
+│   │   ├── __init__.py
+│   │   ├── task_service.py      # TaskService
+│   │   └── role_service.py      # RoleService
+│   ├── commands/
+│   │   ├── __init__.py
+│   │   ├── base.py              # Command (abstract)
+│   │   ├── delete_task.py       # DeleteTaskCommand
+│   │   └── delete_role.py       # DeleteRoleCommand
+│   ├── undo_stack.py            # UndoStack
+│   ├── command_parser.py        # CommandParser
+│   ├── window_manager.py        # WindowManager
+│   └── state.py                 # ApplicationState
+│
+├── domain/                      # DOMAIN LAYER
+│   ├── __init__.py
+│   ├── task.py                  # Task
+│   ├── role.py                  # Role
+│   └── enums.py                 # Status, Priority, ViewMode
+│
+├── data/                        # DATA LAYER
+│   ├── __init__.py
+│   ├── database.py              # Database
+│   ├── task_repository.py       # TaskRepository
+│   ├── role_repository.py       # RoleRepository
+│   └── window_repository.py     # WindowRepository
+│
+└── utils/                       # Utilities
+    ├── __init__.py
+    ├── date_parser.py           # Date parsing helpers
+    └── colors.py                # Color definitions
+```
