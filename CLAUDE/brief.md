@@ -8,10 +8,10 @@ A terminal-based productivity tool for managing role-based to-do lists with wind
 
 ## 2. Technology Stack
 
-- **Language**: Python
+- **Language**: Typescript
 - **Runtime**: Bun
 - **TUI Frameworks**: Rich and Click
-- **Database**: SQLite3
+- **Database**: SQLite
 
 ## 3. Data Model
 
