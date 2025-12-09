@@ -92,7 +92,7 @@
                 </f-test>
                 <f-logic>
                     <command-parser implemented="false">
-                        Parse 'D[task-ID]' format, extract task_id (e.g., 't3' ’ 3), validate format, trigger deletion
+                        Parse 'D[task-ID]' format, extract task_id (e.g., 't3' ï¿½ 3), validate format, trigger deletion
                     </command-parser>
                     <task-service-delete implemented="false">
                         TaskService.delete(task_id) calls TaskRepository.delete(), no undo tracking in fundamental version
@@ -261,7 +261,7 @@
                 </f-test>
                 <f-logic>
                     <command-parser implemented="false">
-                        Parse 'Dr[role-ID]' format, extract role_id (e.g., 'r1' ’ display_number=1), lookup actual role_id from display_number, trigger deletion
+                        Parse 'Dr[role-ID]' format, extract role_id (e.g., 'r1' ï¿½ display_number=1), lookup actual role_id from display_number, trigger deletion
                     </command-parser>
                     <role-lookup-by-display-number implemented="false">
                         RoleRepository.get_by_display_number(display_number) queries: SELECT * FROM roles WHERE display_number=?
@@ -482,7 +482,7 @@
 
                     E2E: Add roles incrementally to 8 panels, verify each layout configuration matches spec (2x2 grid at 4 panels, 2x3 grid at 6, etc.). Tab through available roles, verify highlighting, select with Enter. Try adding 9th panel, verify rejection message. Add all roles to layout, type 'w', verify "all roles in layout" message. Verify focus moves to newly added panel. Restart app, verify layout persisted and restored correctly.
 
-                    Edge cases: Add then remove then add same role, layout persistence after crashes, tab navigation with only 1 available role, panel resize animations for each layout transition (1’2, 2’3, etc.), focused panel tracking after new panel added.
+                    Edge cases: Add then remove then add same role, layout persistence after crashes, tab navigation with only 1 available role, panel resize animations for each layout transition (1ï¿½2, 2ï¿½3, etc.), focused panel tracking after new panel added.
                 </c-test>
                 <c-logic>
                     <command-parser implemented="false">
@@ -598,7 +598,7 @@
                 <c-test>
                     Unit: Test WindowManager validates panel_count > 1. Test remove_panel() correctly removes role from panel_roles, adjusts focus index, recalculates layout. Test focus adjustment logic for different removal positions (first, middle, last panel). Test confirmation prompt appears for each removal.
 
-                    E2E: Create 4-panel layout (2x2 grid). Focus different panels and remove each, verify correct reflow for each case (4’3’2’1 panel transitions). Verify focus moves correctly: remove last panel ’ focus shifts to new last, remove middle ’ focus stays at same index. Try removing single panel, verify rejection. Cancel removal confirmation, verify no change. Remove panel then add it back with 'w', verify works correctly. Verify animations: fade out of removed panel, smooth resize/reposition of remaining panels.
+                    E2E: Create 4-panel layout (2x2 grid). Focus different panels and remove each, verify correct reflow for each case (4ï¿½3ï¿½2ï¿½1 panel transitions). Verify focus moves correctly: remove last panel ï¿½ focus shifts to new last, remove middle ï¿½ focus stays at same index. Try removing single panel, verify rejection. Cancel removal confirmation, verify no change. Remove panel then add it back with 'w', verify works correctly. Verify animations: fade out of removed panel, smooth resize/reposition of remaining panels.
 
                     Edge cases: Remove panel while in navigation mode, remove panel while that panel's role is current_role, layout persistence across removals, rapid panel additions and removals, undo after panel removal (does it restore panel to layout?), focus tracking edge cases.
                 </c-test>
