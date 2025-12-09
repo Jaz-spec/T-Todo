@@ -1,0 +1,670 @@
+<user-flows>
+    <core>
+        <flow1 id="add-task">
+            <fundamental>
+                <f-description>
+                    User adds a new task to a role. User types 'a' command in command mode, enters basic task information (title and role), and the task appears in the specified role's panel with a sequential task number. The task defaults to 'todo' status and appears in the role view.
+                </f-description>
+                <f-test>
+                    Unit: Test TaskService.add() creates a task with minimal fields (title, role_id), assigns next task_number, defaults to 'todo' status, and returns task object.
+
+                    E2E: User types 'a', enters title "Test task" and role "r1", confirms task appears in r1 panel with number t1, task has 'todo' status.
+                </f-test>
+                <f-logic>
+                    <command-parser implemented="false">
+                        Parse 'a' command input, extract command type, trigger task creation flow
+                    </command-parser>
+                    <task-input-form implemented="false">
+                        Simple form accepting title (required) and role_id (required), validates non-empty title
+                    </task-input-form>
+                    <task-service-add implemented="false">
+                        TaskService.add(title, role_id) creates Task domain object, gets next task_number from repository, sets status='todo', saves via TaskRepository
+                    </task-service-add>
+                    <task-repository-save implemented="false">
+                        TaskRepository.save() inserts task into database, returns task_id
+                    </task-repository-save>
+                    <task-repository-get-next-number implemented="false">
+                        TaskRepository.get_next_task_number(role_id) queries max task_number for role, returns max+1 or 1 if no tasks
+                    </task-repository-get-next-number>
+                    <display-refresh implemented="false">
+                        Display.render() refreshes active panel to show newly added task at bottom of todo section
+                    </display-refresh>
+                </f-logic>
+            </fundamental>
+            <comprehensive>
+                <c-description>
+                    User adds a fully-featured task with all optional fields. User types 'a' in command mode, is presented with a comprehensive form accepting title, role, due date (with flexible date parsing), priority (High/Medium/Low), story points (1,2,3,5,8,13), description (markdown formatted), and task dependencies (blocks/blocked by). Input is validated for length constraints (title max 200 chars, description max 2000 chars), date formats (DD MM YY, +Xd, tomorrow, today), priority normalization (case-insensitive), circular dependency prevention, and required fields. Helpful error messages guide the user. Task appears in correct sorted position based on status and due date, with dependency indicators and appropriate text brightness (70% for blocked tasks).
+                </c-description>
+                <c-test>
+                    Unit: Test TaskService.add() with all fields, validates length constraints, normalizes priority case, parses various date formats, prevents circular dependencies, returns validation errors.
+
+                    E2E: User types 'a', enters comprehensive task with due date "tomorrow", priority "high", story points 5, description with markdown, dependency on existing task. Verify task appears in correct sorted position, displays all fields formatted correctly, blocked tasks show at 70% brightness, overdue tasks highlighted, dependency chains validated.
+
+                    Edge cases: Test maximum length inputs, invalid date formats, circular dependency attempts, self-blocking prevention, invalid priority values, invalid story points, tasks without due dates sort to bottom.
+                </c-test>
+                <c-logic>
+                    <command-parser implemented="false">
+                        Parse 'a' command, transition to task input mode with form fields visible
+                    </command-parser>
+                    <comprehensive-input-form implemented="false">
+                        Multi-field form with title (required), role_id (required), due_date (optional), priority (optional), story_points (optional), description (optional), blocking_tasks (optional). Field navigation with tab/enter.
+                    </comprehensive-input-form>
+                    <input-validation-service implemented="false">
+                        Validates title length (max 200), description length (max 2000), role exists, date format parseable, priority in valid set, story points in valid set, circular dependencies prevented
+                    </input-validation-service>
+                    <date-parser implemented="false">
+                        Parses multiple date formats: DD MM YY, DD MM YYYY, +Xd, 'tomorrow', 'today'. Returns ISO format YYYY-MM-DD or validation error.
+                    </date-parser>
+                    <priority-normalizer implemented="false">
+                        Accepts case-insensitive priority input (high/HIGH/High), normalizes to capitalized form (High). Validates against High/Medium/Low.
+                    </priority-normalizer>
+                    <circular-dependency-validator implemented="false">
+                        Recursively checks if adding dependency would create cycle. Prevents task from blocking itself. Returns validation error if circular dependency detected.
+                    </circular-dependency-validator>
+                    <task-service-add-comprehensive implemented="false">
+                        TaskService.add() with all parameters, calls validation service, creates Task domain object with all fields, saves task and dependencies in transaction
+                    </task-service-add-comprehensive>
+                    <task-repository-save-with-dependencies implemented="false">
+                        TaskRepository.save() inserts task and task_dependencies in transaction, maintains referential integrity
+                    </task-repository-save-with-dependencies>
+                    <task-sorting-logic implemented="false">
+                        Sorts tasks by: 1) in-progress (by due date, created date), 2) todo (by due date, created date), 3) no due date tasks last (by created date)
+                    </task-sorting-logic>
+                    <display-render-with-styling implemented="false">
+                        Display.render() shows tasks with role color, blocked tasks at 70% brightness, dependency indicators "Blocked by: t2 | Blocks: t4", formatted due dates, priority/story points, description preview
+                    </display-render-with-styling>
+                    <error-message-display implemented="false">
+                        Shows specific validation errors near form fields: "Title too long (max 200 chars)", "Invalid date format", "Circular dependency detected", etc.
+                    </error-message-display>
+                </c-logic>
+            </comprehensive>
+        </flow1>
+
+        <flow2 id="delete-task">
+            <fundamental>
+                <f-description>
+                    User deletes a task from a role. User types 'D[task-ID]' in command mode (e.g., 'Dt3'), the task is immediately removed from the database and disappears from the display. The task number is not reused for future tasks in that role.
+                </f-description>
+                <f-test>
+                    Unit: Test TaskService.delete(task_id) removes task from database, task_number is not reused when new task added.
+
+                    E2E: User types 'Dt2' where t2 exists in current role, task disappears from display, database query confirms deletion, adding new task gets next sequential number (skipping deleted number).
+                </f-test>
+                <f-logic>
+                    <command-parser implemented="false">
+                        Parse 'D[task-ID]' format, extract task_id (e.g., 't3' ’ 3), validate format, trigger deletion
+                    </command-parser>
+                    <task-service-delete implemented="false">
+                        TaskService.delete(task_id) calls TaskRepository.delete(), no undo tracking in fundamental version
+                    </task-service-delete>
+                    <task-repository-delete implemented="false">
+                        TaskRepository.delete(task_id) executes DELETE FROM tasks WHERE id=?, cascades to task_dependencies via foreign key
+                    </task-repository-delete>
+                    <task-numbering-preservation implemented="false">
+                        TaskRepository.get_next_task_number() returns max(task_number)+1, does not fill gaps from deleted tasks
+                    </task-numbering-preservation>
+                    <display-refresh implemented="false">
+                        Display.render() refreshes panel to show task removed, remaining tasks maintain their numbers
+                    </display-refresh>
+                </f-logic>
+            </fundamental>
+            <comprehensive>
+                <c-description>
+                    User deletes a task with full undo support and dependency handling. User types 'D[task-ID]' in command mode, system checks if task blocks other tasks and shows confirmation prompt if so ("Task t3 blocks 2 other tasks. Delete anyway?"). Upon confirmation, task data is serialized and pushed to undo stack, then deleted from database. Task disappears from display. User can undo deletion with 'u' command within session, which restores task with all fields and dependencies intact. If task blocks no other tasks, deletion is immediate without confirmation. Task numbers remain preserved (no reuse).
+                </c-description>
+                <c-test>
+                    Unit: Test DeleteTaskCommand.execute() serializes task data, pushes to undo stack, deletes task. Test DeleteTaskCommand.undo() restores task from serialized data. Test dependency check returns blocking task count. Test confirmation prompt appears only for tasks with blocking relationships.
+
+                    E2E: Delete task that blocks others, verify confirmation prompt shows, confirm deletion, verify task removed and undo stack populated. Execute undo command, verify task restored with all fields including dependencies. Delete task with no blocking relationships, verify immediate deletion without prompt. Verify task numbers not reused after deletion and restoration.
+
+                    Edge cases: Delete task that is blocked by others (no confirmation needed), undo when undo stack empty, delete then add new tasks then undo (number conflicts), undo after archival cleanup, multiple sequential deletes then undos.
+                </c-test>
+                <c-logic>
+                    <command-parser implemented="false">
+                        Parse 'D[task-ID]', extract task_id, trigger delete command creation
+                    </command-parser>
+                    <dependency-checker implemented="false">
+                        Queries task_dependencies table for blocking relationships: SELECT COUNT(*) FROM task_dependencies WHERE task_id=?
+                    </dependency-checker>
+                    <confirmation-prompt implemented="false">
+                        If task blocks others, shows modal confirmation: "Task tX blocks N other tasks. Delete anyway? [y/n]". Accepts y/n input, cancels on 'n'.
+                    </confirmation-prompt>
+                    <delete-task-command implemented="false">
+                        DeleteTaskCommand extends Command. execute() method: retrieves full task data including dependencies, serializes to JSON, pushes to UndoStack, calls TaskRepository.delete(). Stores serialized data in command instance.
+                    </delete-task-command>
+                    <task-serializer implemented="false">
+                        Serializes Task object to JSON including all fields (id, role_id, task_number, title, description, due_date, priority, story_points, status, completed_at, blocking_tasks). Used for undo data storage.
+                    </task-serializer>
+                    <undo-stack-push implemented="false">
+                        UndoStack.push(command) stores command instance in memory stack (List[Command]), also persists to undo_stack table (action_type='delete_task', data=JSON)
+                    </undo-stack-push>
+                    <task-repository-delete-cascade implemented="false">
+                        TaskRepository.delete(task_id) removes task and all dependency records via CASCADE foreign key constraints
+                    </task-repository-delete-cascade>
+                    <undo-command implemented="false">
+                        Application handles 'u' command, pops from UndoStack, calls command.undo(). DeleteTaskCommand.undo() deserializes task data, restores task and dependencies via TaskRepository.save()
+                    </undo-command>
+                    <undo-stack-pop implemented="false">
+                        UndoStack.pop() removes most recent command from stack, returns Command instance for undo execution, removes from undo_stack table
+                    </undo-stack-pop>
+                    <task-restoration implemented="false">
+                        TaskRepository.save() inserts task with original task_number (not next available), restores task_dependencies entries, checks for task_number conflicts (unlikely but handled)
+                    </task-restoration>
+                    <display-refresh-after-deletion implemented="false">
+                        Display.render() removes task from panel, updates task list
+                    </display-refresh-after-deletion>
+                    <display-refresh-after-undo implemented="false">
+                        Display.render() shows restored task in correct sorted position with all formatting and dependency indicators
+                    </display-refresh-after-undo>
+                    <error-handling implemented="false">
+                        Handles task not found error, database errors during deletion, undo stack empty error, task number conflict during restoration
+                    </error-handling>
+                </c-logic>
+            </comprehensive>
+        </flow2>
+
+        <flow3 id="add-role">
+            <fundamental>
+                <f-description>
+                    User creates a new role. User types 'n' in command mode, enters a role name, system assigns the next available display number and selects the next color from the predefined palette sequentially. Role is saved to database and appears available for task assignment. No panel is automatically created.
+                </f-description>
+                <f-test>
+                    Unit: Test RoleService.create(name) assigns next display_number, selects next color from palette, saves to database, returns Role object.
+
+                    E2E: User types 'n', enters role name "Developer", role is created with display_number=1, color from palette, user can now assign tasks to r1, role appears in role selection lists.
+                </f-test>
+                <f-logic>
+                    <command-parser implemented="false">
+                        Parse 'n' command, transition to role name input mode, prompt for role name
+                    </command-parser>
+                    <role-name-input implemented="false">
+                        Simple text input accepting role name, validates non-empty string
+                    </role-name-input>
+                    <role-service-create implemented="false">
+                        RoleService.create(name) creates Role domain object, calls get_next_display_number(), assigns next color from palette, saves via RoleRepository
+                    </role-service-create>
+                    <display-number-assignment implemented="false">
+                        RoleRepository.get_next_display_number() queries MAX(display_number) + 1, returns 1 if no roles exist
+                    </display-number-assignment>
+                    <color-palette-manager implemented="false">
+                        Maintains color palette array (8 colors). Gets current role count, uses count % 8 as index to assign next color sequentially
+                    </color-palette-manager>
+                    <role-repository-save implemented="false">
+                        RoleRepository.save(role) inserts into roles table with name, display_number (UNIQUE), color, created_at timestamp
+                    </role-repository-save>
+                    <role-availability implemented="false">
+                        Role is now queryable via RoleRepository.get_all(), appears in role selection dropdowns/lists for task assignment
+                    </role-availability>
+                </f-logic>
+            </fundamental>
+            <comprehensive>
+                <c-description>
+                    User creates a fully-validated role with constraints and feedback. User types 'n' in command mode, is prompted for role name with validation (max 50 characters, non-empty, whitespace trimmed). System checks for duplicate names and provides error message if name already exists. Upon successful validation, system assigns next sequential display number and next color from the 8-color palette (cycling through palette). Success message displays: "Role '[name]' created as r[display_number]". Role appears in role selection lists with color indicator. If user cancels input (Esc), returns to command mode without creating role.
+                </c-description>
+                <c-test>
+                    Unit: Test RoleService.create() validates name length (max 50), trims whitespace, checks for duplicate names, assigns display_number and color correctly, handles color palette cycling (9th role uses color[0] again). Test validation returns appropriate error messages.
+
+                    E2E: Create role with valid name, verify success message and role available. Attempt duplicate name, verify error message. Attempt name over 50 chars, verify truncation or error. Create 9 roles, verify 9th role cycles to first color. Cancel role creation with Esc, verify no role created. Create role with whitespace padding, verify trimmed name saved.
+
+                    Edge cases: Empty name, whitespace-only name, exactly 50 char name, unicode characters in name, special characters, SQL injection attempts, 8th and 9th role color assignment, maximum number of roles (testing display_number limits).
+                </c-test>
+                <c-logic>
+                    <command-parser implemented="false">
+                        Parse 'n' command, set application mode to role_name_input, display input prompt with instructions
+                    </command-parser>
+                    <role-name-input-form implemented="false">
+                        Text input with prompt "Enter role name:", accepts input, handles Esc to cancel, trims whitespace on submit
+                    </role-name-input-form>
+                    <role-name-validator implemented="false">
+                        Validates: non-empty after trim, max 50 characters, role name not already in use. Returns validation errors or success.
+                    </role-name-validator>
+                    <duplicate-name-checker implemented="false">
+                        RoleRepository.exists_by_name(name) queries roles table: SELECT COUNT(*) FROM roles WHERE name=? (case-insensitive)
+                    </duplicate-name-checker>
+                    <role-service-create-validated implemented="false">
+                        RoleService.create(name) validates input, gets next display_number, assigns color from palette with cycling, creates Role object, saves, returns role or validation error
+                    </role-service-create-validated>
+                    <display-number-sequential-assignment implemented="false">
+                        RoleRepository.get_next_display_number() returns MAX(display_number) + 1, ensures UNIQUE constraint satisfied
+                    </display-number-sequential-assignment>
+                    <color-palette-cycling implemented="false">
+                        Colors array has 8 colors. Current role count % 8 determines color index. 9th role gets colors[0], ensuring cycling.
+                    </color-palette-cycling>
+                    <role-repository-save-with-constraints implemented="false">
+                        RoleRepository.save() inserts role, handles UNIQUE constraint violations on display_number gracefully (retry with next number if collision)
+                    </role-repository-save-with-constraints>
+                    <success-message-display implemented="false">
+                        Shows success notification: "Role '[name]' created as r[display_number]" in color of role, displayed temporarily above command box
+                    </success-message-display>
+                    <role-selection-list-update implemented="false">
+                        Role immediately appears in any UI elements listing available roles (task creation form, window layout selector) with color indicator
+                    </role-selection-list-update>
+                    <error-message-display implemented="false">
+                        Shows specific validation errors: "Role name too long (max 50 chars)", "Role name '[name]' already exists", "Role name cannot be empty"
+                    </error-message-display>
+                    <cancel-handling implemented="false">
+                        Esc key returns to command mode, no database changes, no role created, no error message
+                    </cancel-handling>
+                </c-logic>
+            </comprehensive>
+        </flow3>
+
+        <flow4 id="delete-role">
+            <fundamental>
+                <f-description>
+                    User deletes a role. User types 'Dr[role-ID]' in command mode (e.g., 'Dr1'), the role and all associated tasks are immediately deleted from database via CASCADE constraint. Role disappears from role selection lists. If role was displayed in window layout, its panel is removed and layout is recalculated. Display numbers of other roles are not affected (gaps remain in numbering).
+                </f-description>
+                <f-test>
+                    Unit: Test RoleService.delete(role_id) removes role from database, CASCADE deletes all tasks. Test display_number gaps remain after deletion.
+
+                    E2E: Create role r1 with tasks, delete with 'Dr1', verify role and tasks removed from database, role not in selection lists, panel removed from layout if present, other roles maintain their display numbers.
+                </f-test>
+                <f-logic>
+                    <command-parser implemented="false">
+                        Parse 'Dr[role-ID]' format, extract role_id (e.g., 'r1' ’ display_number=1), lookup actual role_id from display_number, trigger deletion
+                    </command-parser>
+                    <role-lookup-by-display-number implemented="false">
+                        RoleRepository.get_by_display_number(display_number) queries: SELECT * FROM roles WHERE display_number=?
+                    </role-lookup-by-display-number>
+                    <role-service-delete implemented="false">
+                        RoleService.delete(role_id) calls RoleRepository.delete(), no undo support in fundamental version
+                    </role-service-delete>
+                    <role-repository-delete implemented="false">
+                        RoleRepository.delete(role_id) executes: DELETE FROM roles WHERE id=?, CASCADE constraint automatically removes all tasks and task_dependencies
+                    </role-repository-delete>
+                    <window-layout-cleanup implemented="false">
+                        If role was in window layout, WindowManager removes panel for that role, recalculates layout for remaining panels
+                    </window-layout-cleanup>
+                    <display-refresh implemented="false">
+                        Display.render() refreshes layout without deleted role panel, role removed from selection lists
+                    </display-refresh>
+                </f-logic>
+            </fundamental>
+            <comprehensive>
+                <c-description>
+                    User deletes a role with confirmation and undo support. User types 'Dr[role-ID]' in command mode. If role has active tasks, system shows confirmation prompt: "Role r[X] '[name]' has N tasks. Delete role and all tasks? [y/n]". If role has no tasks, deletion is immediate without confirmation. Upon confirmation, role and all task data are serialized (including all tasks with dependencies) and pushed to undo stack as a single DeleteRoleCommand, then role is deleted from database (CASCADE removes all tasks). If role was displayed in window layout, its panel is removed and remaining panels reflow according to layout rules (1-8 panel layouts). Success message shows: "Role '[name]' (r[X]) and N tasks deleted". User can undo deletion with 'u' command, which restores role and all tasks with their original task_numbers and dependencies intact. Display numbers remain preserved (gaps not filled). If user cancels confirmation, no changes occur.
+                </c-description>
+                <c-test>
+                    Unit: Test DeleteRoleCommand.execute() checks for active tasks, shows confirmation if needed, serializes role and all tasks, pushes to undo stack, deletes role. Test DeleteRoleCommand.undo() restores role and all tasks from serialized data. Test confirmation prompt only appears when has_active_tasks() returns true.
+
+                    E2E: Delete role with tasks, verify confirmation prompt with task count, confirm and verify deletion and success message. Execute undo, verify role and all tasks restored with original numbers and dependencies. Delete empty role, verify immediate deletion without confirmation. Delete role that's in window layout, verify panel removed and layout reflows correctly. Cancel deletion at confirmation, verify no changes.
+
+                    Edge cases: Delete role with in-progress and done tasks, delete role with tasks that have complex dependency chains, undo after other operations, undo then delete same role again, delete last remaining role, delete role then create new role with same name (different display_number), layout reflow edge cases (delete role from 3-panel layout, 8-panel layout).
+                </c-test>
+                <c-logic>
+                    <command-parser implemented="false">
+                        Parse 'Dr[role-ID]', extract display_number, lookup role by display_number, trigger delete command creation
+                    </command-parser>
+                    <role-lookup implemented="false">
+                        RoleRepository.get_by_display_number(display_number) returns Role object or not found error
+                    </role-lookup>
+                    <active-tasks-checker implemented="false">
+                        RoleService.has_active_tasks(role_id) queries: SELECT COUNT(*) FROM tasks WHERE role_id=?, returns count
+                    </active-tasks-checker>
+                    <confirmation-prompt implemented="false">
+                        If has_active_tasks > 0, shows modal: "Role r[X] '[name]' has N tasks. Delete role and all tasks? [y/n]". Waits for y/n input, cancels on 'n'.
+                    </confirmation-prompt>
+                    <delete-role-command implemented="false">
+                        DeleteRoleCommand extends Command. execute() method: retrieves role data and all associated task data (with dependencies), serializes to JSON including role fields and array of all tasks, pushes to UndoStack, calls RoleRepository.delete().
+                    </delete-role-command>
+                    <role-and-tasks-serializer implemented="false">
+                        Serializes Role object and array of all Task objects to JSON: {role: {...}, tasks: [{...}, {...}]}. Includes all task fields and dependencies.
+                    </role-and-tasks-serializer>
+                    <undo-stack-push implemented="false">
+                        UndoStack.push(DeleteRoleCommand) stores in memory and persists to undo_stack table (action_type='delete_role', data=JSON with role and tasks)
+                    </undo-stack-push>
+                    <role-repository-delete-cascade implemented="false">
+                        RoleRepository.delete(role_id) executes: DELETE FROM roles WHERE id=?, ON DELETE CASCADE automatically removes all tasks and task_dependencies
+                    </role-repository-delete-cascade>
+                    <window-layout-update implemented="false">
+                        WindowManager checks if deleted role was in layout. If yes, removes panel, updates panel_count and panel_roles array, saves to WindowRepository, triggers layout reflow.
+                    </window-layout-update>
+                    <layout-reflow-logic implemented="false">
+                        WindowManager recalculates layout for remaining panels: 1 panel (full), 2 panels (50/50), 3 panels (50% + 2x25%), etc. Applies layout strategy and repositions panels.
+                    </layout-reflow-logic>
+                    <success-message-display implemented="false">
+                        Shows notification: "Role '[name]' (r[X]) and N tasks deleted" temporarily above command box
+                    </success-message-display>
+                    <undo-command implemented="false">
+                        Application handles 'u' command, pops DeleteRoleCommand from UndoStack, calls command.undo(). DeleteRoleCommand.undo() deserializes role and tasks data, restores role first, then all tasks with original task_numbers and dependencies.
+                    </undo-command>
+                    <role-restoration implemented="false">
+                        RoleRepository.save() inserts role with original display_number. TaskRepository.save() batch inserts all tasks with original task_numbers and dependencies.
+                    </role-restoration>
+                    <display-refresh-after-deletion implemented="false">
+                        Display.render() removes role panel if in layout, recalculates layout, updates role selection lists
+                    </display-refresh-after-deletion>
+                    <display-refresh-after-undo implemented="false">
+                        Display.render() shows restored role in selection lists, optionally adds back to window layout if it was there before deletion (would need to track layout position in undo data)
+                    </display-refresh-after-undo>
+                    <error-handling implemented="false">
+                        Handles role not found error, database errors during deletion, undo stack empty error, display_number or task_number conflicts during restoration
+                    </error-handling>
+                    <cancel-handling implemented="false">
+                        'n' at confirmation prompt cancels deletion, returns to command mode, no changes made, no error message
+                    </cancel-handling>
+                </c-logic>
+            </comprehensive>
+        </flow4>
+
+        <flow5 id="switch-role-view">
+            <fundamental>
+                <f-description>
+                    User switches to view a specific role. User types 'r' command in command mode, system updates the current_role_id in ApplicationState, and if that role is not currently in the window layout, the display changes to show that role's panel in full-screen view. If the role is already visible in a multi-panel layout, focus moves to that panel.
+                </f-description>
+                <f-test>
+                    Unit: Test ApplicationState.set_current_role(role_id) updates current_role_id. Test Display determines if role is in current layout, shows full-screen panel if not.
+
+                    E2E: Create two roles r1 and r2. Add tasks to both. Type 'r' and select r2, verify display shows r2 panel full-screen if not in layout. If r2 already in multi-panel layout, verify focus moves to r2 panel.
+                </f-test>
+                <f-logic>
+                    <command-parser implemented="false">
+                        Parse 'r' command, trigger role selection mode, prompt for role display_number
+                    </command-parser>
+                    <role-selection-input implemented="false">
+                        Simple input accepting role display_number (e.g., '1' for r1), validates role exists
+                    </role-selection-input>
+                    <application-state-update implemented="false">
+                        ApplicationState.set_current_role(role_id) updates current_role_id field, triggers display update
+                    </application-state-update>
+                    <role-in-layout-checker implemented="false">
+                        WindowManager.is_role_in_layout(role_id) checks if role_id is in current panel_roles array
+                    </role-in-layout-checker>
+                    <display-mode-decision implemented="false">
+                        If role not in layout: Display switches to single full-screen panel for that role. If role in layout: WindowManager.set_focused_panel(role_id) moves focus to that panel.
+                    </display-mode-decision>
+                    <display-refresh implemented="false">
+                        Display.render() shows either full-screen panel or highlights focused panel in multi-panel layout
+                    </display-refresh>
+                </f-logic>
+            </fundamental>
+            <comprehensive>
+                <c-description>
+                    User switches role view with rich navigation and feedback. User types 'r' in command mode, system presents a list of all available roles with their display numbers, names, colors, and task counts: "r1: Developer (5 tasks)", "r2: Designer (2 tasks)". User selects by typing display_number or using arrow keys to navigate and enter to select. System updates ApplicationState.current_role_id. If role is not in current window layout, display transitions to full-screen panel view for that role with smooth visual feedback. If role is already visible in multi-panel layout, focus smoothly transitions to that panel (panel highlights with 120% brightness). Current role indicator appears in UI (e.g., in command box prompt: "> [r2] "). If user cancels selection (Esc), returns to command mode with no change. If no roles exist, shows message: "No roles created. Type 'n' to create a role."
+                </c-description>
+                <c-test>
+                    Unit: Test role selection list generation includes all roles with correct counts. Test ApplicationState updates and triggers appropriate display mode. Test focus change logic for multi-panel layouts. Test empty state when no roles exist.
+
+                    E2E: Create multiple roles with tasks. Type 'r', verify list shows all roles with task counts in their colors. Select role not in layout, verify smooth transition to full-screen view. Add roles to multi-panel layout, type 'r' and select visible role, verify focus moves with brightness change. Cancel selection with Esc, verify no change. Delete all roles, type 'r', verify empty state message.
+
+                    Edge cases: Switch to role with no tasks, switch to same role already focused, rapid role switching, switch role while in kanban view (should it switch to tile view or keep kanban for new role?), keyboard navigation in role list, invalid role number entry.
+                </c-test>
+                <c-logic>
+                    <command-parser implemented="false">
+                        Parse 'r' command, set application mode to role_selection, trigger role list display
+                    </command-parser>
+                    <role-list-generator implemented="false">
+                        RoleService.get_all_with_task_counts() queries all roles with task counts: SELECT roles.*, COUNT(tasks.id) FROM roles LEFT JOIN tasks GROUP BY roles.id
+                    </role-list-generator>
+                    <role-selection-list-ui implemented="false">
+                        Displays formatted list: "[display_number]: [name] ([task_count] tasks)" in role color. Supports both direct number input and arrow key navigation with enter to select.
+                    </role-selection-list-ui>
+                    <keyboard-navigation implemented="false">
+                        Arrow up/down to navigate list, enter to select highlighted role, Esc to cancel, number keys for direct selection
+                    </keyboard-navigation>
+                    <role-validation implemented="false">
+                        Validates selected role exists and is valid before proceeding
+                    </role-validation>
+                    <application-state-update implemented="false">
+                        ApplicationState.set_current_role(role_id) updates current_role_id, publishes state change event
+                    </application-state-update>
+                    <role-in-layout-checker implemented="false">
+                        WindowManager.is_role_in_layout(role_id) checks panel_roles array for role_id
+                    </role-in-layout-checker>
+                    <full-screen-transition implemented="false">
+                        If role not in layout: WindowManager temporarily sets single-panel mode, Display.render() shows full-screen panel for role with smooth transition animation
+                    </full-screen-transition>
+                    <focus-transition implemented="false">
+                        If role in layout: WindowManager.set_focused_panel(role_id) updates focused_panel_index, Display.render() highlights focused panel at 120% brightness, others at 100%
+                    </focus-transition>
+                    <current-role-indicator implemented="false">
+                        CommandBox updates prompt to show current role: "> [r2] " in role color. Provides context for command execution.
+                    </current-role-indicator>
+                    <display-render-with-animation implemented="false">
+                        Display.render() includes smooth visual transitions: fade/slide for full-screen mode switch, brightness change animation for focus transitions
+                    </display-render-with-animation>
+                    <empty-state-handling implemented="false">
+                        If RoleRepository.get_all() returns empty list, shows message: "No roles created. Type 'n' to create a role." instead of role selection list
+                    </empty-state-handling>
+                    <cancel-handling implemented="false">
+                        Esc key during role selection returns to command mode, maintains current_role_id, no display change
+                    </cancel-handling>
+                    <error-handling implemented="false">
+                        Handles invalid role number input: "Role r[X] not found", database errors during role retrieval
+                    </error-handling>
+                </c-logic>
+            </comprehensive>
+        </flow5>
+
+        <flow6 id="add-role-to-window">
+            <fundamental>
+                <f-description>
+                    User adds a role to the window layout. User types 'w' in command mode, selects a role that is not currently in the layout, and the role is added to the next available panel position. Window layout is recalculated based on new panel count (1-8 panels follow specific layout rules). The layout is saved to the database for persistence. If 8 panels already exist, command is rejected.
+                </f-description>
+                <f-test>
+                    Unit: Test WindowManager.add_panel(role_id) adds role to panel_roles array, increments panel_count, calculates new layout dimensions, saves to WindowRepository. Test rejects addition when panel_count >= 8.
+
+                    E2E: Create 2 roles. Type 'w', select role not in layout, verify new panel appears with correct dimensions according to layout rules (e.g., 1 panel = full screen, 2 panels = 50/50 split). Verify layout persisted to database. Restart app, verify layout restored.
+                </f-test>
+                <f-logic>
+                    <command-parser implemented="false">
+                        Parse 'w' command, trigger add-to-layout mode, check current panel_count < 8
+                    </command-parser>
+                    <available-roles-list implemented="false">
+                        Query roles not currently in layout: RoleRepository.get_all() filtered by roles not in WindowManager.panel_roles
+                    </available-roles-list>
+                    <role-selection-input implemented="false">
+                        Simple input showing available roles, user selects by display_number
+                    </role-selection-input>
+                    <window-manager-add-panel implemented="false">
+                        WindowManager.add_panel(role_id) appends role_id to panel_roles array, increments panel_count, calls calculate_layout()
+                    </window-manager-add-panel>
+                    <layout-calculation implemented="false">
+                        WindowManager.calculate_layout(panel_count) returns layout dimensions and positions for each panel based on panel count rules (1=full, 2=50/50, 3=50%+25%+25%, etc.)
+                    </layout-calculation>
+                    <panel-creation implemented="false">
+                        Display creates new Panel object for added role, sets dimensions and position from layout calculation
+                    </panel-creation>
+                    <window-repository-save implemented="false">
+                        WindowRepository.save_layout(panel_count, panel_roles) updates window_layout table: UPDATE window_layout SET panel_count=?, panel_roles=? WHERE id=1
+                    </window-repository-save>
+                    <display-refresh implemented="false">
+                        Display.render() redraws all panels with new layout dimensions
+                    </display-refresh>
+                </f-logic>
+            </fundamental>
+            <comprehensive>
+                <c-description>
+                    User adds a role to window layout with tab navigation and validation. User types 'w' in command mode. System shows list of roles not currently in layout: "Available roles: r1: Developer, r3: Designer". User can select by typing display_number or pressing Tab to cycle through available roles (visual highlight on each tab press), then Enter to confirm selection. Maximum 8 panels enforced - if already at 8 panels, shows message: "Maximum 8 panels reached. Remove a panel first with 'c'." System validates role exists and is not already in layout. Upon selection, new panel is added in next position according to layout rules (1-8 panel layouts), with smooth visual transition as panels resize and reposition. Layout persists to database. New panel is automatically focused (120% brightness). If no roles available to add (all roles in layout), shows: "All roles are already in the window layout." If no roles exist at all, shows: "No roles created. Type 'n' to create a role."
+                </c-description>
+                <c-test>
+                    Unit: Test WindowManager validates panel_count < 8. Test Tab navigation cycles through available roles. Test layout calculation for each panel count (1-8). Test persistence and restoration. Test validation: role exists, role not in layout, panel limit not exceeded.
+
+                    E2E: Add roles incrementally to 8 panels, verify each layout configuration matches spec (2x2 grid at 4 panels, 2x3 grid at 6, etc.). Tab through available roles, verify highlighting, select with Enter. Try adding 9th panel, verify rejection message. Add all roles to layout, type 'w', verify "all roles in layout" message. Verify focus moves to newly added panel. Restart app, verify layout persisted and restored correctly.
+
+                    Edge cases: Add then remove then add same role, layout persistence after crashes, tab navigation with only 1 available role, panel resize animations for each layout transition (1’2, 2’3, etc.), focused panel tracking after new panel added.
+                </c-test>
+                <c-logic>
+                    <command-parser implemented="false">
+                        Parse 'w' command, set mode to add_panel_mode, trigger validation checks
+                    </command-parser>
+                    <panel-limit-check implemented="false">
+                        WindowManager checks if panel_count >= 8, returns error message if limit reached: "Maximum 8 panels reached. Remove a panel first with 'c'."
+                    </panel-limit-check>
+                    <available-roles-query implemented="false">
+                        RoleService.get_roles_not_in_layout(panel_roles) returns roles not in current layout: SELECT * FROM roles WHERE id NOT IN (panel_roles)
+                    </available-roles-query>
+                    <all-roles-in-layout-check implemented="false">
+                        If available_roles list is empty but roles exist, show: "All roles are already in the window layout."
+                    </all-roles-in-layout-check>
+                    <no-roles-exist-check implemented="false">
+                        If RoleRepository.get_all() is empty, show: "No roles created. Type 'n' to create a role."
+                    </no-roles-exist-check>
+                    <role-selection-with-tab implemented="false">
+                        Display available roles list. Tab key cycles through roles with visual highlight (120% brightness on highlighted role). Enter confirms selection. Number key for direct selection. Esc cancels.
+                    </role-selection-with-tab>
+                    <tab-navigation-state implemented="false">
+                        InputContext tracks current_highlighted_index, Tab increments (wraps to 0 at end), updates highlight display
+                    </tab-navigation-state>
+                    <role-validation implemented="false">
+                        Validates selected role exists in database and is not in panel_roles array
+                    </role-validation>
+                    <window-manager-add-panel-validated implemented="false">
+                        WindowManager.add_panel(role_id) validates constraints, appends to panel_roles, increments panel_count, calculates new layout, updates focused_panel_index to new panel
+                    </window-manager-add-panel-validated>
+                    <layout-calculation-comprehensive implemented="false">
+                        WindowManager.calculate_layout() returns layout config for all 8 panel count scenarios with exact dimensions and positions:
+                        1: full screen
+                        2: 50/50 horizontal split
+                        3: left 50%, right top/bottom 25% each
+                        4: 2x2 grid
+                        5: left 50%, right 3 stacked 16.6% each
+                        6: 2x3 grid
+                        7: left 3 stacked, right 4 stacked
+                        8: left 4 stacked, right 4 stacked
+                    </layout-calculation-comprehensive>
+                    <panel-creation-with-config implemented="false">
+                        Display.create_panel(role_id, layout_config) instantiates Panel with role, sets x, y, width, height from config
+                    </panel-creation-with-config>
+                    <layout-transition-animation implemented="false">
+                        Display.render() animates panel resize and reposition, smooth transitions (200ms duration) from old layout to new layout
+                    </layout-transition-animation>
+                    <focus-new-panel implemented="false">
+                        WindowManager.set_focused_panel(new_panel_index) sets focus to newly added panel, Display renders it at 120% brightness
+                    </focus-new-panel>
+                    <window-repository-persist implemented="false">
+                        WindowRepository.save_layout() persists panel_count and panel_roles JSON array to window_layout table
+                    </window-repository-persist>
+                    <layout-restoration implemented="false">
+                        On app startup, WindowRepository.load_layout() queries window_layout table, WindowManager restores panel_count and panel_roles, recreates panels with correct layout
+                    </layout-restoration>
+                    <display-refresh implemented="false">
+                        Display.render() redraws all panels with new layout, applies focused panel brightness, shows smooth transitions
+                    </display-refresh>
+                    <error-handling implemented="false">
+                        Handles role not found, database save errors, layout calculation errors for invalid panel counts
+                    </error-handling>
+                    <cancel-handling implemented="false">
+                        Esc during role selection returns to command mode, no layout change
+                    </cancel-handling>
+                </c-logic>
+            </comprehensive>
+        </flow6>
+
+        <flow7 id="remove-role-from-window">
+            <fundamental>
+                <f-description>
+                    User removes the currently focused role from the window layout. User types 'c' in command mode, the panel for the currently focused role is removed from the layout. Remaining panels reflow according to reduced panel count layout rules (1-8 panel layouts). Updated layout is saved to database. If only one panel exists, command shows message: "Cannot remove last panel from layout."
+                </f-description>
+                <f-test>
+                    Unit: Test WindowManager.remove_current_panel() removes focused role from panel_roles array, decrements panel_count, recalculates layout. Test prevents removal when panel_count = 1.
+
+                    E2E: Create 3-panel layout. Focus middle panel. Type 'c', verify that panel removed and remaining 2 panels reflow to 50/50 layout. Verify layout persisted. Try 'c' on single panel, verify rejection message.
+                </f-test>
+                <f-logic>
+                    <command-parser implemented="false">
+                        Parse 'c' command, trigger remove_panel operation on WindowManager
+                    </command-parser>
+                    <single-panel-check implemented="false">
+                        WindowManager checks if panel_count == 1, returns error message: "Cannot remove last panel from layout."
+                    </single-panel-check>
+                    <window-manager-remove-panel implemented="false">
+                        WindowManager.remove_current_panel() gets focused_panel_index, removes that role_id from panel_roles array, decrements panel_count, recalculates layout
+                    </window-manager-remove-panel>
+                    <focus-adjustment implemented="false">
+                        After removal, if focused_panel_index >= new panel_count, set focused_panel_index = panel_count - 1 (focus last panel)
+                    </focus-adjustment>
+                    <layout-recalculation implemented="false">
+                        WindowManager.calculate_layout(new_panel_count) returns layout config for remaining panels
+                    </layout-recalculation>
+                    <panel-destruction implemented="false">
+                        Display destroys Panel object for removed role, removes from render list
+                    </panel-destruction>
+                    <panel-repositioning implemented="false">
+                        Display updates remaining panels with new dimensions and positions from layout calculation
+                    </panel-repositioning>
+                    <window-repository-save implemented="false">
+                        WindowRepository.save_layout(panel_count, panel_roles) persists updated layout
+                    </window-repository-save>
+                    <display-refresh implemented="false">
+                        Display.render() redraws remaining panels in new layout
+                    </display-refresh>
+                </f-logic>
+            </fundamental>
+            <comprehensive>
+                <c-description>
+                    User removes a role from window layout with confirmation and smooth transitions. User types 'c' in command mode. If only one panel exists, shows: "Cannot remove last panel from layout." If multiple panels exist, system identifies currently focused panel and shows confirmation: "Remove r[X]: [Role Name] from layout? [y/n]". Upon confirmation, panel smoothly fades out (200ms), remaining panels animate to new positions and sizes according to reduced panel count layout rules. Focus automatically shifts: if removed panel was last in array, focus moves to new last panel; otherwise focus moves to next panel in sequence. Layout persists to database. Success message shows: "Panel r[X] removed." If user cancels (n/Esc), no change occurs. Role remains available to be added back to layout later with 'w' command.
+                </c-description>
+                <c-test>
+                    Unit: Test WindowManager validates panel_count > 1. Test remove_panel() correctly removes role from panel_roles, adjusts focus index, recalculates layout. Test focus adjustment logic for different removal positions (first, middle, last panel). Test confirmation prompt appears for each removal.
+
+                    E2E: Create 4-panel layout (2x2 grid). Focus different panels and remove each, verify correct reflow for each case (4’3’2’1 panel transitions). Verify focus moves correctly: remove last panel ’ focus shifts to new last, remove middle ’ focus stays at same index. Try removing single panel, verify rejection. Cancel removal confirmation, verify no change. Remove panel then add it back with 'w', verify works correctly. Verify animations: fade out of removed panel, smooth resize/reposition of remaining panels.
+
+                    Edge cases: Remove panel while in navigation mode, remove panel while that panel's role is current_role, layout persistence across removals, rapid panel additions and removals, undo after panel removal (does it restore panel to layout?), focus tracking edge cases.
+                </c-test>
+                <c-logic>
+                    <command-parser implemented="false">
+                        Parse 'c' command, trigger remove_current_panel operation
+                    </command-parser>
+                    <single-panel-check implemented="false">
+                        WindowManager.panel_count == 1 check, returns message: "Cannot remove last panel from layout."
+                    </single-panel-check>
+                    <focused-panel-identification implemented="false">
+                        WindowManager.get_focused_panel() returns Panel object and role info for currently focused panel using focused_panel_index
+                    </focused-panel-identification>
+                    <confirmation-prompt implemented="false">
+                        Shows modal: "Remove r[X]: [Role Name] from layout? [y/n]" in role color. Waits for y/n/Esc input.
+                    </confirmation-prompt>
+                    <fade-out-animation implemented="false">
+                        Display animates removal: Panel opacity fades from 100% to 0% over 200ms before removal
+                    </fade-out-animation>
+                    <window-manager-remove-panel-validated implemented="false">
+                        WindowManager.remove_current_panel() removes role_id at focused_panel_index from panel_roles, decrements panel_count, adjusts focus index, calculates new layout
+                    </window-manager-remove-panel-validated>
+                    <focus-adjustment-logic implemented="false">
+                        If removed_index == panel_count (was last panel): focused_panel_index = panel_count - 1
+                        Else: focused_panel_index stays same (shifts to next panel)
+                    </focus-adjustment-logic>
+                    <layout-recalculation-comprehensive implemented="false">
+                        WindowManager.calculate_layout(new_panel_count) returns config for reduced panel count, following same layout rules (1-8 panel configurations)
+                    </layout-recalculation-comprehensive>
+                    <panel-destruction implemented="false">
+                        Display.destroy_panel(panel_index) removes Panel object from panels list, clears render resources
+                    </panel-destruction>
+                    <reflow-animation implemented="false">
+                        Display.render() animates remaining panels: smooth transition (200ms) from old positions/sizes to new positions/sizes, easing function for professional feel
+                    </reflow-animation>
+                    <focus-update-display implemented="false">
+                        Display highlights newly focused panel at 120% brightness, updates panel borders to indicate focus
+                    </focus-update-display>
+                    <window-repository-persist implemented="false">
+                        WindowRepository.save_layout() persists updated panel_count and panel_roles array
+                    </window-repository-persist>
+                    <success-message implemented="false">
+                        Shows notification: "Panel r[X] removed." temporarily above command box
+                    </success-message>
+                    <role-still-available implemented="false">
+                        Role remains in database and in role selection lists, can be re-added to layout with 'w' command
+                    </role-still-available>
+                    <display-refresh implemented="false">
+                        Display.render() redraws layout with animations, updates focused panel highlighting
+                    </display-refresh>
+                    <error-handling implemented="false">
+                        Handles invalid panel index, database save errors, animation interruption edge cases
+                    </error-handling>
+                    <cancel-handling implemented="false">
+                        'n' or Esc at confirmation returns to command mode, no layout change, no messages
+                    </cancel-handling>
+                </c-logic>
+            </comprehensive>
+        </flow7>
+    </core>
+
+    <MVP>
+        <!-- MVP user flows would be defined here when requested -->
+    </MVP>
+
+    <post-MVP>
+        <!-- Post-MVP user flows would be defined here when requested -->
+    </post-MVP>
+</user-flows>
