@@ -1,8 +1,19 @@
 {
-  "name": "t-todo",
+  "name": "ttdo",
+  "version": "0.1.0",
+  "description": "Terminal based toool for managing role-based to-do lists",
   "module": "index.ts",
   "type": "module",
-  "private": true,
+  "bin": {
+    "ttdo": "./index.ts"
+  },
+  "scripts": {
+    "dev": "bun run index.ts"
+  },
+  "keywords": ["cli", "todo", "tui", "productivity", "terminal"],
+  "author": "Jaz",
+  "license": "MIT",
+  "private": false,
   "devDependencies": {
     "@types/bun": "latest"
   },
