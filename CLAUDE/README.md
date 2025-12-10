@@ -10,10 +10,5 @@ Iterative development philosophy and execution approach. Defines principles for 
 ### `brief.md`
 Complete technical specification for the Terminal Todo application. Includes data models, UI layouts, command reference, and MVP checklist.
 
-### `tasks.xml`
-Detailed 9-iteration implementation plan with task breakdowns, success criteria, testing requirements, and checkpoint questions for each iteration.
-
-## Subdirectories
-
-### `Iteration_reports/`
-PR-style reports documenting what was built, tested, and learned in each development iteration. Includes template for new reports.
+### `userFlows.xml`
+Defines user flows and their acompanying tests at two levels of complexity: an initial implementation to put in place the fundamental logic of the user flow, followed by the comprehensive implementation of that user flow. This is not a sequential task list to work through, it is a reference point to work from.
